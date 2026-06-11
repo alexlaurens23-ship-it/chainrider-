@@ -47,16 +47,28 @@ Monorepo via **npm workspaces**.
 
 ```
 CLAUDE.md                     This file — permanent context.
+package.json                  Workspaces root. Scripts: dev / build / verify.
+tsconfig.base.json            Shared strict compiler options; every workspace extends it.
 docs/
   PHYSICS_RESEARCH.md         Physics research + final rig spec (see appendix below).
   ART_RESEARCH.md             Art research + neon bike visual spec (see appendix below).
 packages/
-  physics/                    (TBD) Deterministic sim + scoring. Shared browser/Node.
+  physics/                    Deterministic sim + scoring. tsup dual ESM/CJS (dist/index.js + .cjs).
+    src/sim.ts                createSim / stepSim / getSnapshot (world + chain terrain; rig TBD).
+    src/constants.ts          SIM_DT, gravity, solver iterations, ground friction.
+    src/scoring.ts            SCORING constants object (sole scoring source of truth).
+    src/types.ts              Vec2Like, INPUT bitmask, Sim, SimOptions, SimSnapshot.
 apps/
-  web/                        (TBD) Vite + TS + Canvas2D client.
-  api/                        (TBD) Fastify + Supabase + node-cron.
+  web/                        Vite + vanilla TS. Fullscreen canvas grid placeholder.
+    src/main.ts               Canvas resize + placeholder grid render.
+    src/net.ts                Typed apiFetch helper + getHealth. Dev proxy /api -> :8787.
+  api/                        Fastify on :8787 (ESM, tsx dev). GET /api/health live.
+    src/routes/*.ts           auth/tracks/runs/leaderboards/payouts/admin plugin stubs ({todo:true}).
+    .env.example              SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, ADMIN_KEY.
 scripts/
-  launch/                     (TBD) PumpPortal token launch.
+  dev.mjs                     Zero-dep concurrent runner for root `npm run dev` (api + web).
+  launch/                     PumpPortal token launch — typed launchToken stub only.
+deploy/                       Empty placeholder for hosting/infra config.
 ```
 
 ## Status
@@ -67,14 +79,15 @@ _Update at the end of every session._
 - Research phase: `docs/PHYSICS_RESEARCH.md` (Planck wheel-joint rig, fixed-timestep loop, determinism checklist).
 - Research phase: `docs/ART_RESEARCH.md` (code-drawn vector neon bike chosen; skin config; draw order).
 - This `CLAUDE.md` established.
+- Monorepo skeleton (2026-06-11): 4 workspaces wired and type-checking (`npm run verify` clean). Physics builds dual ESM/CJS via tsup with `planck@1.5.0` pinned exact; `createSim`/`stepSim`/`getSnapshot` create a real stepping world with chain terrain (no bike rig yet). Web shows placeholder grid + pings `/api/health` through the Vite proxy (verified end-to-end). API serves health + six `{todo:true}` route-plugin stubs. Root `npm run dev` uses zero-dep `scripts/dev.mjs` (no `concurrently`). First commit made; repo-local git identity set. Note: port 5173 is often taken on this machine — Vite falls back to 5174.
 
 **In progress**
 - Nothing yet.
 
 **Next**
-- Scaffold the npm-workspaces monorepo (`packages/physics`, `apps/web`, `apps/api`, `scripts/launch`).
-- Stand up `packages/physics`: deterministic world + bike rig + scoring + input-replay API (must build for browser and Node).
+- Stand up `packages/physics` for real: bike rig (Appendix A), control model, crash detection, scoring, input-replay API.
 - Decide DB schema for `cr_tracks` (frozen/versioned), `cr_runs`, `cr_payout_windows`.
+- Web: fixed-timestep accumulator loop + render interpolation; draw a test track via `createSim`.
 
 ---
 
