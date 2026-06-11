@@ -1,0 +1,19 @@
+{
+  "name": "@chainrider/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "verify": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chainrider/physics": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^6.0.0"
+  }
+}

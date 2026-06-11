@@ -1,0 +1,12 @@
+{
+  "name": "@chainrider/launch",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "verify": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
