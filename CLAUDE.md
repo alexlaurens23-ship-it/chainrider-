@@ -74,9 +74,18 @@ apps/
     src/playground/panel.ts   Hand-rolled slider per BikeTune key; rebuilds sim on change.
     src/playground/hud.ts     Score/combo/flips/crashes/FPS/tick + api health.
     src/playground/selftest.ts DETERMINISM SELF-TEST: 600 live ticks vs simulateReplay, PASS/FAIL overlay.
-  api/                        Fastify on :8787 (ESM, tsx dev). GET /api/health live.
-    src/routes/*.ts           auth/tracks/runs/leaderboards/payouts/admin plugin stubs ({todo:true}).
-    .env.example              SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, ADMIN_KEY.
+  api/                        Fastify on :8787 (ESM, tsx dev). Track pipeline live.
+    src/trackgen.ts           PURE deterministic generation: downsample/normalize (6m/candle, vol-scaled 25–90m band, 55° global-rescale clamp)/rawTrack/smoothTrack (centripetal Catmull-Rom, 1 vtx/m, monotonic-x guard)/stats/difficultyFor. No I/O, golden-tested.
+    src/chartdata.ts          fetchCloses(source, sourceId, period): CoinGecko (daily-bucketed; optional COINGECKO_API_KEY for ALL/days=max) + GeckoTerminal ("network:pool" source_id). Retry ×3 expo backoff, Retry-After honored. ONLY place external APIs are called.
+    src/db.ts                 Lazy service-role Supabase client (getDb).
+    src/routes/tracks.ts      mapsRoutes (GET /api/maps: active maps + both modes' stats + cr_config prize_ladder) + tracksRoutes (GET /api/tracks/:id: frozen points, served even when inactive).
+    src/routes/admin.ts       X-Admin-Key gated (fail closed): POST /maps (fetch→generate raw+smooth v1→insert; difficulty from raw), POST /maps/:id/regenerate (version n+1, old rows only get active=false).
+    src/routes/*.ts           auth/runs/leaderboards/payouts plugin stubs ({todo:true}).
+    sql/001_track_pipeline.sql Reference DDL for live schema + hardening (freeze trigger, unique indexes, period-constraint widening). Owner applies in Supabase SQL editor.
+    scripts/seed-maps.ts      Seeds launch set via admin HTTP API (idempotent, 409=skip, 15s between calls). `npm run seed -w @chainrider/api`.
+    scripts/gen-golden.ts     Regenerates golden strings for trackgen tests (only on deliberate algorithm changes).
+    test/trackgen.test.ts     Vitest: golden byte-identical JSON + property tests (`npm test -w @chainrider/api`).
+    .env.example              SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, ADMIN_KEY, COINGECKO_API_KEY (optional, needed for ALL maps).
 scripts/
   dev.mjs                     Zero-dep concurrent runner for root `npm run dev` (api + web).
   launch/                     PumpPortal token launch — typed launchToken stub only.
@@ -101,13 +110,18 @@ _Update at the end of every session._
 
 - **P2.1 — arcade grounded stabilization layer** (2026-06-12): four grounded-only assists in `stepSim`, every one gated on ≥1 wheel grounded (fully-airborne ticks run the pre-P2.1 code paths — locked air feel untouched): (1) PD auto-stabilizer pulling chassis toward the direction-averaged terrain slope under the wheels (`stabilizerStrength` 90, `stabilizerDamping` 12; any lean input drops authority to 30% so deliberate wheelies/manuals win; off during crash freeze), (2) motor torque taper — full to 40% of maxOmega, then linear to `torqueFalloffFloor` 0.35 at maxOmega, (3) hill traction assist — throttle uphill >15°: force along surface = `hillAssist` 0.45 × m·g·sin(slope); zero downhill/in air, (4) anti-wheelie bias — grounded throttle torque scaled linearly to `antiWheelieFloor` 0.4 between 25°→50° nose-up vs slope, bypassed entirely while lean-back held. `maxMotorTorque` 60 → **41**. `SIM_VERSION=6`. New vitest suite in `packages/physics/test/` (vitest devDep). Verified: verify clean, tests pass (climb reaches top with ≤8° pitch error), 10× dist replay bit-identical, flat full-throttle max pitch 9.5° vs deliberate wheelie unrestricted.
 
+- **P3 — track pipeline** (2026-06-12): full chart→track pipeline in `apps/api`. Pure deterministic `trackgen.ts` (downsample ≤1000 candles for ALL, normalize 6m/candle + vol-scaled 25–90m band + 55° slope clamp via single global y-rescale, centripetal Catmull-Rom smooth mode resampled 1 vtx/m with monotonic-x guard, stats/difficulty easy<20°/med<32°/hard<45°/insane≥45° from raw) — golden-tested byte-identical (21 vitest tests). `chartdata.ts` fetchers (CoinGecko + GeckoTerminal, retry ×3). Routes: GET /api/maps, GET /api/tracks/:id, admin POST /maps + /maps/:id/regenerate (X-Admin-Key, fail-closed). Discovered the **live Supabase schema pre-exists** (integer ids; cr_tracks has FLAT stats columns point_count/world_length/max_slope_deg/volatility/par_time_ms, NOT jsonb; cr_config prize_ladder is per-difficulty arrays) — code adapted to it; `sql/001_track_pipeline.sql` is reference + optional hardening. **Period vocabulary is uppercase `90D|180D|1Y|ALL`** (live cr_maps check constraint currently allows only 1Y/ALL; widening statement in sql file). Seeded + verified live end-to-end: btc-1y (regenerated to v2; v1 frozen-but-servable confirmed), eth-1y, sol-1y. Verify + tests clean.
+
 **In progress**
 - Nothing.
 
 **Next**
+- **ALL-period maps blocked**: CoinGecko keyless API 401s on `days=max` (365-day history limit). Owner: get a free demo key → `COINGECKO_API_KEY` in `apps/api/.env`, then re-run `npm run seed -w @chainrider/api` (btc-all/eth-all/sol-all will fill in; 1y maps 409-skip).
+- Owner: apply the HARDENING section of `apps/api/sql/001_track_pipeline.sql` in the Supabase SQL editor (freeze trigger, unique indexes, period-constraint widening for 90D/180D memecoin maps).
+- Memecoin maps: paste GeckoTerminal pool addresses into the two placeholders in `apps/api/scripts/seed-maps.ts`.
+- Difficulty calibration: all three 1Y majors land "insane" (real daily candles at 6m spacing are steep) — thresholds or SPACING_M may need a pass once playable.
 - Neon bike renderer per Appendix B (replace primitive shapes); rear light ribbon.
-- Decide DB schema for `cr_tracks` (frozen/versioned), `cr_runs`, `cr_payout_windows`.
-- API: wire `simulateReplay` into run submission validation (P6).
+- API: wire `simulateReplay` into run submission validation (P6) — `cr_runs` already exists in the live schema.
 
 ---
 
