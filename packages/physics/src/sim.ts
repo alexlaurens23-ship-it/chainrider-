@@ -1,57 +1,434 @@
-import { Chain, Vec2, World } from "planck";
+import { Box, Chain, Circle, Vec2, WheelJoint, World } from "planck";
+import type { Body } from "planck";
 import {
+  CHECKPOINT_FRACTION,
+  CRASH_FREEZE_TICKS,
+  FINISH_FLAG_OFFSET,
   GRAVITY_X,
   GRAVITY_Y,
-  GROUND_FRICTION,
+  KILL_FLOOR_DROP,
+  LEAD_IN_METERS,
   POSITION_ITERATIONS,
+  RUN_OUT_METERS,
   SIM_DT,
   VELOCITY_ITERATIONS,
 } from "./constants";
-import type { Keymask, Sim, SimOptions, SimSnapshot, Vec2Like } from "./types";
+import { createScoreState, resetScoreStreaks, updateScore } from "./scoring";
+import { sweptCircleHitsTerrain, terrainSlopeAt, terrainYAt, wrapAngle } from "./terrain";
+import { DEFAULT_TUNE, INPUT } from "./types";
+import type {
+  BikeTune,
+  Checkpoint,
+  Keymask,
+  Sim,
+  SimOptions,
+  SimSnapshot,
+  TrackInfo,
+  TrackPoint,
+} from "./types";
 
-/**
- * Create a deterministic simulation over a frozen track polyline.
- * Currently builds the world and terrain only; the bike rig lands next.
- */
-export function createSim(trackPoints: readonly Vec2Like[], options: SimOptions = {}): Sim {
+const ALL_INPUT_BITS =
+  INPUT.THROTTLE | INPUT.BRAKE | INPUT.LEAN_LEFT | INPUT.LEAN_RIGHT | INPUT.JUMP;
+
+/** Spawn clearance so wheels settle onto the ground instead of starting inside it. */
+const SPAWN_CLEARANCE = 0.02;
+
+function buildTrackInfo(trackPoints: readonly TrackPoint[], tune: BikeTune): TrackInfo {
   if (trackPoints.length < 2) {
     throw new Error(`createSim requires at least 2 track points, got ${trackPoints.length}`);
   }
+  for (let i = 0; i < trackPoints.length; i++) {
+    const [x, y] = trackPoints[i];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error(`track point ${i} is not finite: [${x}, ${y}]`);
+    }
+    if (i > 0 && x <= trackPoints[i - 1][0]) {
+      throw new Error(`track x must be strictly increasing (point ${i})`);
+    }
+  }
+
+  const first = trackPoints[0];
+  const last = trackPoints[trackPoints.length - 1];
+  const terrain: TrackPoint[] = [
+    [first[0] - LEAD_IN_METERS, first[1]],
+    ...trackPoints.map((p): TrackPoint => [p[0], p[1]]),
+    [last[0] + RUN_OUT_METERS, last[1]],
+  ];
+
+  let minY = Infinity;
+  for (const [, y] of terrain) minY = Math.min(minY, y);
+
+  const spawnX = first[0] - LEAD_IN_METERS / 2;
+  const finishX = last[0] + FINISH_FLAG_OFFSET;
+  const chassisCenterAbove = tune.wheelRadius + tune.axleDropY + SPAWN_CLEARANCE;
+
+  const checkpoints: Checkpoint[] = [];
+  const span = finishX - spawnX;
+  for (let x = spawnX; x < finishX; x += span * CHECKPOINT_FRACTION) {
+    checkpoints.push({ x, y: terrainYAt(terrain, x) + chassisCenterAbove });
+  }
+
+  return { terrain, spawnX, finishX, killY: minY - KILL_FLOOR_DROP, checkpoints };
+}
+
+/** Place chassis + wheels upright at (x, y = chassis center), all velocities zero. */
+function setBikePose(sim: Sim, x: number, y: number): void {
+  const { tune } = sim;
+  const halfBase = tune.wheelbase / 2;
+  sim.chassis.setTransform(new Vec2(x, y), 0);
+  sim.rearWheel.setTransform(new Vec2(x - halfBase, y - tune.axleDropY), 0);
+  sim.frontWheel.setTransform(new Vec2(x + halfBase, y - tune.axleDropY), 0);
+  for (const body of [sim.chassis, sim.rearWheel, sim.frontWheel]) {
+    body.setLinearVelocity(new Vec2(0, 0));
+    body.setAngularVelocity(0);
+  }
+}
+
+function isWheelGrounded(wheel: Body, ground: Body): boolean {
+  for (let ce = wheel.getContactList(); ce; ce = ce.next ?? null) {
+    if (ce.other === ground && ce.contact.isTouching()) return true;
+  }
+  return false;
+}
+
+function isHeadTouching(sim: Sim): boolean {
+  for (let ce = sim.chassis.getContactList(); ce; ce = ce.next ?? null) {
+    if (ce.other !== sim.ground) continue;
+    const contact = ce.contact;
+    if (!contact.isTouching()) continue;
+    if (contact.getFixtureA() === sim.headFixture || contact.getFixtureB() === sim.headFixture) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Create a deterministic simulation over a frozen track polyline.
+ * Body/fixture/joint creation order is fixed (ground → chassis → rear wheel →
+ * front wheel → rear joint → front joint) — solver order depends on it.
+ */
+export function createSim(
+  trackPoints: readonly TrackPoint[],
+  tune?: Partial<BikeTune>,
+  options: SimOptions = {},
+): Sim {
+  const fullTune: BikeTune = { ...DEFAULT_TUNE, ...tune };
+  const track = buildTrackInfo(trackPoints, fullTune);
+  const spawn = track.checkpoints[0];
 
   const world = new World({ gravity: new Vec2(GRAVITY_X, GRAVITY_Y) });
 
   const ground = world.createBody({ type: "static" });
   ground.createFixture({
     shape: new Chain(
-      trackPoints.map((p) => new Vec2(p.x, p.y)),
+      track.terrain.map(([x, y]) => new Vec2(x, y)),
       false,
     ),
-    friction: GROUND_FRICTION,
+    friction: fullTune.groundFriction,
   });
 
-  return {
-    world,
-    stepIndex: 0,
-    velocityIterations: options.velocityIterations ?? VELOCITY_ITERATIONS,
-    positionIterations: options.positionIterations ?? POSITION_ITERATIONS,
+  const chassis = world.createBody({
+    type: "dynamic",
+    position: new Vec2(spawn.x, spawn.y),
+    bullet: true,
+  });
+  chassis.createFixture({
+    shape: new Box(fullTune.chassisWidth / 2, fullTune.chassisHeight / 2),
+    density: fullTune.chassisDensity,
+    friction: fullTune.chassisFriction,
+  });
+  const headFixture = chassis.createFixture({
+    shape: new Circle(new Vec2(fullTune.headOffsetX, fullTune.headOffsetY), fullTune.headRadius),
+    isSensor: true,
+    density: 0,
+  });
+
+  const halfBase = fullTune.wheelbase / 2;
+  const makeWheel = (x: number): Body => {
+    const wheel = world.createBody({
+      type: "dynamic",
+      position: new Vec2(x, spawn.y - fullTune.axleDropY),
+      bullet: true,
+    });
+    wheel.createFixture({
+      shape: new Circle(fullTune.wheelRadius),
+      density: fullTune.wheelDensity,
+      friction: fullTune.wheelFriction,
+    });
+    return wheel;
   };
+  const rearWheel = makeWheel(spawn.x - halfBase);
+  const frontWheel = makeWheel(spawn.x + halfBase);
+
+  const rearJoint = world.createJoint(
+    new WheelJoint(
+      {
+        enableMotor: true,
+        motorSpeed: 0,
+        maxMotorTorque: 0,
+        frequencyHz: fullTune.suspensionHz,
+        dampingRatio: fullTune.suspensionDamping,
+      },
+      chassis,
+      rearWheel,
+      rearWheel.getPosition(),
+      new Vec2(0, 1),
+    ),
+  );
+  const frontJoint = world.createJoint(
+    new WheelJoint(
+      {
+        enableMotor: false,
+        motorSpeed: 0,
+        maxMotorTorque: fullTune.frontBrakeTorque,
+        frequencyHz: fullTune.suspensionHz,
+        dampingRatio: fullTune.suspensionDamping,
+      },
+      chassis,
+      frontWheel,
+      frontWheel.getPosition(),
+      new Vec2(0, 1),
+    ),
+  );
+  if (!rearJoint || !frontJoint) throw new Error("failed to create wheel joints");
+
+  const head = chassis.getWorldPoint(new Vec2(fullTune.headOffsetX, fullTune.headOffsetY));
+
+  const sim: Sim = {
+    world,
+    tune: fullTune,
+    track,
+    parTimeMs: options.parTimeMs,
+    ground,
+    chassis,
+    rearWheel,
+    frontWheel,
+    headFixture,
+    rearJoint,
+    frontJoint,
+    tick: 0,
+    prevKeymask: 0,
+    attitude: 0,
+    prevHeadX: head.x,
+    prevHeadY: head.y,
+    tickMaxImpulse: 0,
+    headContact: false,
+    freezeTicks: 0,
+    checkpointIndex: 0,
+    score: createScoreState(),
+    finished: false,
+    finishTick: -1,
+  };
+
+  // Hard-landing detector: remember the biggest bike-vs-ground normal impulse
+  // each step; stepSim combines it with the chassis-vs-slope angle.
+  world.on("post-solve", (contact, impulse) => {
+    const bodyA = contact.getFixtureA().getBody();
+    const bodyB = contact.getFixtureB().getBody();
+    if (bodyA !== sim.ground && bodyB !== sim.ground) return;
+    const other = bodyA === sim.ground ? bodyB : bodyA;
+    if (other !== sim.chassis && other !== sim.rearWheel && other !== sim.frontWheel) return;
+    for (const n of impulse.normalImpulses) {
+      if (n > sim.tickMaxImpulse) sim.tickMaxImpulse = n;
+    }
+  });
+
+  return sim;
+}
+
+/** Exact respawn at the last checkpoint: upright, zero velocity, motors idle. */
+function respawn(sim: Sim): void {
+  const cp = sim.track.checkpoints[sim.checkpointIndex];
+  setBikePose(sim, cp.x, cp.y);
+  sim.attitude = 0;
+  sim.rearJoint.setMotorSpeed(0);
+  sim.rearJoint.setMaxMotorTorque(0);
+  sim.frontJoint.enableMotor(false);
+  resetScoreStreaks(sim.score);
+  const head = sim.chassis.getWorldPoint(new Vec2(sim.tune.headOffsetX, sim.tune.headOffsetY));
+  sim.prevHeadX = head.x;
+  sim.prevHeadY = head.y;
 }
 
 /**
- * Advance the simulation by exactly one fixed step. `keymask` is the input
- * sampled for this step; it will drive the bike rig once that exists, and is
- * accepted now so the replay-facing signature never changes.
+ * Advance the simulation by exactly one fixed step at SIM_DT. The ONLY place
+ * input handling, motor control, lean torque, jump, ground/crash detection,
+ * and scoring happen. `keymask` is the input sampled for this step.
  */
 export function stepSim(sim: Sim, keymask: Keymask): void {
-  void keymask;
-  sim.world.step(SIM_DT, sim.velocityIterations, sim.positionIterations);
-  sim.stepIndex += 1;
+  const { tune } = sim;
+
+  const frozen = sim.freezeTicks > 0;
+  if (frozen) {
+    keymask = 0;
+    sim.freezeTicks -= 1;
+    if (sim.freezeTicks === 0) respawn(sim);
+  }
+  keymask &= ALL_INPUT_BITS;
+
+  const throttle = (keymask & INPUT.THROTTLE) !== 0;
+  const brake = (keymask & INPUT.BRAKE) !== 0;
+  const leanDir =
+    ((keymask & INPUT.LEAN_LEFT) !== 0 ? 1 : 0) - ((keymask & INPUT.LEAN_RIGHT) !== 0 ? 1 : 0);
+
+  // Drive / brake (brake overrides throttle; X-Moto-style strong stop).
+  if (brake) {
+    sim.rearJoint.setMotorSpeed(0);
+    sim.rearJoint.setMaxMotorTorque(tune.rearBrakeTorque);
+    sim.frontJoint.enableMotor(true);
+    sim.frontJoint.setMotorSpeed(0);
+    sim.frontJoint.setMaxMotorTorque(tune.frontBrakeTorque);
+  } else {
+    sim.frontJoint.enableMotor(false);
+    if (throttle) {
+      sim.rearJoint.setMotorSpeed(-tune.maxOmega);
+      sim.rearJoint.setMaxMotorTorque(tune.maxMotorTorque);
+    } else {
+      sim.rearJoint.setMotorSpeed(0);
+      sim.rearJoint.setMaxMotorTorque(0); // freewheel
+    }
+  }
+
+  // Lean: X-Moto attitude pattern — set while held, decay toward zero after.
+  if (leanDir !== 0) sim.attitude = leanDir * tune.attitudeTorque;
+  if (sim.attitude !== 0) {
+    sim.chassis.applyTorque(sim.attitude, true);
+    sim.attitude *= tune.attitudeDecay;
+    if (Math.abs(sim.attitude) < tune.attitudeMin) sim.attitude = 0;
+  }
+
+  // Jump: edge-triggered, needs ground contact (state as of the last step).
+  const jumpPressed = (keymask & INPUT.JUMP) !== 0 && (sim.prevKeymask & INPUT.JUMP) === 0;
+  if (
+    jumpPressed &&
+    (isWheelGrounded(sim.rearWheel, sim.ground) || isWheelGrounded(sim.frontWheel, sim.ground))
+  ) {
+    const up = sim.chassis.getWorldVector(new Vec2(0, 1));
+    sim.chassis.applyLinearImpulse(
+      new Vec2(up.x * tune.jumpImpulse, up.y * tune.jumpImpulse),
+      sim.chassis.getWorldCenter(),
+      true,
+    );
+  }
+
+  const prevAngle = sim.chassis.getAngle();
+  sim.tickMaxImpulse = 0;
+
+  sim.world.step(SIM_DT, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
+  sim.tick += 1;
+
+  const pos = sim.chassis.getPosition();
+  const angle = sim.chassis.getAngle();
+  const vel = sim.chassis.getLinearVelocity();
+  const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y);
+  const head = sim.chassis.getWorldPoint(new Vec2(tune.headOffsetX, tune.headOffsetY));
+  const rearGrounded = isWheelGrounded(sim.rearWheel, sim.ground);
+  const frontGrounded = isWheelGrounded(sim.frontWheel, sim.ground);
+
+  // Airborne spin cap: keeps flips controllable without touching grounded
+  // dynamics. Applied post-step, so it shapes the next step's rotation.
+  if (!rearGrounded && !frontGrounded) {
+    const omega = sim.chassis.getAngularVelocity();
+    if (omega > tune.chassisSpinCap) sim.chassis.setAngularVelocity(tune.chassisSpinCap);
+    else if (omega < -tune.chassisSpinCap) sim.chassis.setAngularVelocity(-tune.chassisSpinCap);
+  }
+
+  const slope = terrainSlopeAt(sim.track.terrain, pos.x);
+  const landingAligned =
+    Math.abs(wrapAngle(angle - slope)) <= (tune.landingToleranceDeg * Math.PI) / 180;
+
+  let crashed = false;
+  if (!frozen && !sim.finished) {
+    if (
+      isHeadTouching(sim) ||
+      sweptCircleHitsTerrain(
+        sim.track.terrain,
+        sim.prevHeadX,
+        sim.prevHeadY,
+        head.x,
+        head.y,
+        tune.headRadius,
+      ) ||
+      pos.y < sim.track.killY
+    ) {
+      crashed = true;
+    } else if (sim.tickMaxImpulse > tune.hardLandingImpulse && !landingAligned) {
+      crashed = true;
+    }
+  }
+
+  let finishedEvent = false;
+  if (!frozen && !crashed) {
+    const cps = sim.track.checkpoints;
+    while (sim.checkpointIndex + 1 < cps.length && pos.x >= cps[sim.checkpointIndex + 1].x) {
+      sim.checkpointIndex += 1;
+    }
+    if (!sim.finished && pos.x >= sim.track.finishX) {
+      sim.finished = true;
+      sim.finishTick = sim.tick;
+      finishedEvent = true;
+    }
+  }
+
+  if (!frozen && (!sim.finished || finishedEvent)) {
+    updateScore(sim.score, {
+      tick: sim.tick,
+      rearGrounded,
+      frontGrounded,
+      angleDelta: angle - prevAngle,
+      speed,
+      landingAligned,
+      crashed,
+      finished: finishedEvent,
+      timeMs: sim.tick * SIM_DT * 1000,
+      parTimeMs: sim.parTimeMs,
+    });
+  }
+
+  if (crashed) {
+    sim.freezeTicks = CRASH_FREEZE_TICKS;
+    sim.attitude = 0;
+  }
+
+  sim.prevHeadX = head.x;
+  sim.prevHeadY = head.y;
+  sim.prevKeymask = keymask;
 }
 
-/** Cheap observable state — grows with the rig (positions, score, crash flags). */
+/** Plain-data view for the renderer — no Planck objects leaked. */
 export function getSnapshot(sim: Sim): SimSnapshot {
+  const chassisPos = sim.chassis.getPosition();
+  const rearPos = sim.rearWheel.getPosition();
+  const frontPos = sim.frontWheel.getPosition();
+  const head = sim.chassis.getWorldPoint(new Vec2(sim.tune.headOffsetX, sim.tune.headOffsetY));
+  const rearGrounded = isWheelGrounded(sim.rearWheel, sim.ground);
+  const frontGrounded = isWheelGrounded(sim.frontWheel, sim.ground);
+  const s = sim.score;
   return {
-    stepIndex: sim.stepIndex,
-    simTime: sim.stepIndex * SIM_DT,
+    chassis: { x: chassisPos.x, y: chassisPos.y, angle: sim.chassis.getAngle() },
+    rearWheel: { x: rearPos.x, y: rearPos.y, angle: sim.rearWheel.getAngle() },
+    frontWheel: { x: frontPos.x, y: frontPos.y, angle: sim.frontWheel.getAngle() },
+    head: { x: head.x, y: head.y },
+    score: s.score,
+    combo: s.combo,
+    flips: s.flips,
+    backflips: s.backflips,
+    frontflips: s.frontflips,
+    crashes: s.crashes,
+    airTicks: s.airTicks,
+    grounded: rearGrounded || frontGrounded,
+    rearGrounded,
+    frontGrounded,
+    wheelieTicks: s.wheelieStreak,
+    crashed: sim.freezeTicks > 0,
+    finished: sim.finished,
+    tick: sim.tick,
+    simTime: sim.tick * SIM_DT,
   };
+}
+
+/** Static track facts (terrain polyline, spawn, finish, kill floor, checkpoints). */
+export function getTrackInfo(sim: Sim): TrackInfo {
+  return sim.track;
 }

@@ -40,6 +40,7 @@ Monorepo via **npm workspaces**.
 | Payout window | **30 min, UTC-aligned** | Windows start on the UTC clock (`:00`/`:30`) |
 | Planck version | `planck@1.5.0` (MIT) | Pinned exact; `planck-js` is deprecated |
 | Solver iterations | velocity **8**, position **3** | Identical browser + Node |
+| Dev ports | web **:5180**, api **:8787** | Vite `strictPort: true` — 5173 belongs to another project on this machine; never fall back |
 
 ## File map
 
@@ -54,14 +55,24 @@ docs/
   ART_RESEARCH.md             Art research + neon bike visual spec (see appendix below).
 packages/
   physics/                    Deterministic sim + scoring. tsup dual ESM/CJS (dist/index.js + .cjs).
-    src/sim.ts                createSim / stepSim / getSnapshot (world + chain terrain; rig TBD).
-    src/constants.ts          SIM_DT, gravity, solver iterations, ground friction.
-    src/scoring.ts            SCORING constants object (sole scoring source of truth).
-    src/types.ts              Vec2Like, INPUT bitmask, Sim, SimOptions, SimSnapshot.
+    src/sim.ts                createSim (terrain+rig+checkpoints) / stepSim (ALL input/control/crash/scoring per tick) / getSnapshot / getTrackInfo.
+    src/replay.ts             simulateReplay(track, tune, inputLog, maxTicks) → FinalResult. Server calls this in P6.
+    src/scoring.ts            SCORING constants + ScoreState + updateScore (sole scoring implementation).
+    src/terrain.ts            Pure polyline geometry: y/slope at x, wrapAngle, swept head-circle death check.
+    src/constants.ts          SIM_DT, gravity, iterations, SIM_VERSION (bump on any physics/scoring change), lead-in/run-out/checkpoint/freeze constants.
+    src/types.ts              INPUT bitmask (1 thr/2 brk/4 leanL/8 leanR/16 jump), BikeTune + DEFAULT_TUNE, Sim, SimSnapshot, TrackInfo, FinalResult.
 apps/
-  web/                        Vite + vanilla TS. Fullscreen canvas grid placeholder.
-    src/main.ts               Canvas resize + placeholder grid render.
+  web/                        Vite + vanilla TS. Tuning playground (the only screen for now).
+    vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787.
+    src/main.ts               Mounts the playground.
     src/net.ts                Typed apiFetch helper + getHealth. Dev proxy /api -> :8787.
+    src/playground/loop.ts    Fixed-timestep accumulator + render interpolation; records input log; orchestrates everything.
+    src/playground/track.ts   Hardcoded TEST_TRACK (flat→ramp→gap→bumps→big jump).
+    src/playground/input.ts   Keyboard → keymask (W/S/A/D/arrows/Space, R reset).
+    src/playground/render.ts  Canvas2D camera-follow renderer, primitive bike shapes.
+    src/playground/panel.ts   Hand-rolled slider per BikeTune key; rebuilds sim on change.
+    src/playground/hud.ts     Score/combo/flips/crashes/FPS/tick + api health.
+    src/playground/selftest.ts DETERMINISM SELF-TEST: 600 live ticks vs simulateReplay, PASS/FAIL overlay.
   api/                        Fastify on :8787 (ESM, tsx dev). GET /api/health live.
     src/routes/*.ts           auth/tracks/runs/leaderboards/payouts/admin plugin stubs ({todo:true}).
     .env.example              SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, ADMIN_KEY.
@@ -79,15 +90,19 @@ _Update at the end of every session._
 - Research phase: `docs/PHYSICS_RESEARCH.md` (Planck wheel-joint rig, fixed-timestep loop, determinism checklist).
 - Research phase: `docs/ART_RESEARCH.md` (code-drawn vector neon bike chosen; skin config; draw order).
 - This `CLAUDE.md` established.
-- Monorepo skeleton (2026-06-11): 4 workspaces wired and type-checking (`npm run verify` clean). Physics builds dual ESM/CJS via tsup with `planck@1.5.0` pinned exact; `createSim`/`stepSim`/`getSnapshot` create a real stepping world with chain terrain (no bike rig yet). Web shows placeholder grid + pings `/api/health` through the Vite proxy (verified end-to-end). API serves health + six `{todo:true}` route-plugin stubs. Root `npm run dev` uses zero-dep `scripts/dev.mjs` (no `concurrently`). First commit made; repo-local git identity set. Note: port 5173 is often taken on this machine — Vite falls back to 5174.
+- Monorepo skeleton (2026-06-11): 4 workspaces wired and type-checking (`npm run verify` clean). Physics builds dual ESM/CJS via tsup with `planck@1.5.0` pinned exact; `createSim`/`stepSim`/`getSnapshot` create a real stepping world with chain terrain (no bike rig yet). Web shows placeholder grid + pings `/api/health` through the Vite proxy (verified end-to-end). API serves health + six `{todo:true}` route-plugin stubs. Root `npm run dev` uses zero-dep `scripts/dev.mjs` (no `concurrently`). First commit made; repo-local git identity set.
+- Dev ports pinned (2026-06-12): web dev server fixed to **:5180** with `strictPort: true` in `apps/web/vite.config.ts` (5173 is used by another project on this machine); api stays on :8787.
+- Real physics + playground (2026-06-12): full deterministic sim in `packages/physics` — Appendix A rig (chassis box + 2 bullet wheels + WheelJoints + head sensor), X-Moto lean, edge-triggered jump (bit 16), crash (head sensor + swept circle + hard-landing impulse∧angle + kill floor 30m below min), 60-tick freeze → checkpoint respawn (every 15% of span), full scoring (airtime 10/6t flat; flips ±2π=250; combo ×1→×5 over 120t on flips/clean landings/wheelies; clean landing 50 within 30°+10t pair; wheelie 20/60t @>2m/s; crash −100 clamp≥0; finish 1000 + (par−t)/100), `simulateReplay` + `SIM_VERSION=2`. Track = chart + 20m lead-in + 30m run-out, finish flag at lastX+10. Input log = change-only `[tick,mask]`, mask persists. Web playground: accumulator loop, tune sliders (live rebuild), HUD, determinism self-test (600 live ticks vs replay → PASS in Node parity test). `npm run verify` clean.
+
+- Tuning pass (2026-06-12): **locked tune v1** is the new `DEFAULT_TUNE` (chassisDensity 10, attitudeTorque 70, wheelRadius 0.34, groundFriction 1.45, etc. — found in the playground; DEFAULT_TUNE in `packages/physics/src/types.ts` is now the source of truth, Appendix A keeps the original research starting values). New tune param `chassisSpinCap` (default 6.5 rad/s): chassis angular velocity clamped to ±cap **only while fully airborne**, applied post-step; grounded dynamics untouched. `SIM_VERSION=3`. Verified: `npm run verify` clean + bit-identical double replay in Node.
 
 **In progress**
-- Nothing yet.
+- Nothing.
 
 **Next**
-- Stand up `packages/physics` for real: bike rig (Appendix A), control model, crash detection, scoring, input-replay API.
+- Neon bike renderer per Appendix B (replace primitive shapes); rear light ribbon.
 - Decide DB schema for `cr_tracks` (frozen/versioned), `cr_runs`, `cr_payout_windows`.
-- Web: fixed-timestep accumulator loop + render interpolation; draw a test track via `createSim`.
+- API: wire `simulateReplay` into run submission validation (P6).
 
 ---
 

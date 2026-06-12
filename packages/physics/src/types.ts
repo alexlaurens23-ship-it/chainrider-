@@ -1,43 +1,216 @@
-import type { World } from "planck";
+import type { Body, Fixture, WheelJoint, World } from "planck";
+import type { ScoreState } from "./scoring";
 
-/** A 2D point in world meters (e.g. one vertex of a chart-terrain polyline). */
-export interface Vec2Like {
-  x: number;
-  y: number;
-}
+/** One terrain vertex: [x, y] in world meters. x must be strictly increasing. */
+export type TrackPoint = [number, number];
 
 /**
- * Input bitmask sampled once per fixed step and recorded as (stepIndex, keymask)
+ * Input bitmask sampled once per fixed step and recorded as (tick, keymask)
  * in the replay log. Bit layout is part of the replay format — never reorder.
  */
 export const INPUT = {
   THROTTLE: 1 << 0,
   BRAKE: 1 << 1,
-  LEAN_BACK: 1 << 2,
-  LEAN_FORWARD: 1 << 3,
+  /** Rotate counter-clockwise (backflip direction when riding +x). */
+  LEAN_LEFT: 1 << 2,
+  /** Rotate clockwise (frontflip direction when riding +x). */
+  LEAN_RIGHT: 1 << 3,
+  JUMP: 1 << 4,
 } as const;
 
 /** Bitwise OR of `INPUT` flags for one fixed step. */
 export type Keymask = number;
 
-export interface SimOptions {
-  /** Velocity solver iterations. Must match browser and Node (default 8). */
-  velocityIterations?: number;
-  /** Position solver iterations. Must match browser and Node (default 3). */
-  positionIterations?: number;
+/** One replay-log entry. The keymask persists until the next entry's tick. */
+export type InputLogEntry = [tick: number, keymask: number];
+
+/**
+ * Every physical/control parameter of the bike. Defaults (DEFAULT_TUNE) come
+ * from CLAUDE.md Appendix A. All values are plain numbers so the playground
+ * can expose a slider per key. A tune is part of a run's identity: replays
+ * only reproduce under the exact tune they were recorded with.
+ */
+export interface BikeTune {
+  /** Chassis box full width, m. */
+  chassisWidth: number;
+  /** Chassis box full height, m. */
+  chassisHeight: number;
+  chassisDensity: number;
+  chassisFriction: number;
+  wheelRadius: number;
+  wheelDensity: number;
+  wheelFriction: number;
+  /** Axle-to-axle spacing, m. Axles sit at chassis-local x = ±wheelbase/2. */
+  wheelbase: number;
+  /** Axles sit this far below the chassis center, m. */
+  axleDropY: number;
+  suspensionHz: number;
+  suspensionDamping: number;
+  /** Max rear-wheel spin rate, rad/s. Motor target is -maxOmega (forward = +x). */
+  maxOmega: number;
+  maxMotorTorque: number;
+  rearBrakeTorque: number;
+  frontBrakeTorque: number;
+  /** X-Moto attitude pattern: torque applied to chassis while leaning, N·m. */
+  attitudeTorque: number;
+  /** Per-step decay factor of the attitude torque (0.75 = lose 25%/step). */
+  attitudeDecay: number;
+  /** Attitude magnitude below which it snaps to zero. */
+  attitudeMin: number;
+  /** Max |chassis angular velocity| while fully airborne, rad/s. Grounded spin is uncapped. */
+  chassisSpinCap: number;
+  /** Linear impulse along chassis-up applied on jump press while grounded, N·s. */
+  jumpImpulse: number;
+  headRadius: number;
+  /** Head sensor center in chassis-local coordinates. */
+  headOffsetX: number;
+  headOffsetY: number;
+  /** Clean-landing / hard-landing chassis-vs-slope tolerance, degrees. */
+  landingToleranceDeg: number;
+  /** post-solve normal impulse above which a misaligned landing is a crash. */
+  hardLandingImpulse: number;
+  groundFriction: number;
 }
 
-/** Opaque-ish simulation handle. Treat as read-only outside this package. */
+/** Locked tune v1 — found in the playground (2026-06-12). Source of truth over Appendix A. */
+export const DEFAULT_TUNE: BikeTune = {
+  chassisWidth: 1.9,
+  chassisHeight: 0.55,
+  chassisDensity: 10,
+  chassisFriction: 0.2,
+  wheelRadius: 0.34,
+  wheelDensity: 0.9,
+  wheelFriction: 1.9,
+  wheelbase: 1.5,
+  axleDropY: 0.4,
+  suspensionHz: 5,
+  suspensionDamping: 0.85,
+  maxOmega: 62,
+  maxMotorTorque: 60,
+  rearBrakeTorque: 55,
+  frontBrakeTorque: 23,
+  attitudeTorque: 70,
+  attitudeDecay: 0.42,
+  attitudeMin: 5.5,
+  chassisSpinCap: 6.5,
+  jumpImpulse: 5,
+  headRadius: 0.18,
+  headOffsetX: 0.1,
+  headOffsetY: 0.55,
+  landingToleranceDeg: 30,
+  hardLandingImpulse: 40,
+  groundFriction: 1.45,
+};
+
+export interface SimOptions {
+  /** Par time for the finish bonus: max(0, (parTimeMs - timeMs) / 100). */
+  parTimeMs?: number;
+}
+
+export interface Checkpoint {
+  x: number;
+  /** Chassis-center spawn y (already includes wheel radius + axle drop). */
+  y: number;
+}
+
+/** Static track facts the renderer reads once. Plain data, never mutated. */
+export interface TrackInfo {
+  /** Full terrain polyline: lead-in + chart points + run-out. */
+  terrain: TrackPoint[];
+  spawnX: number;
+  finishX: number;
+  killY: number;
+  checkpoints: Checkpoint[];
+}
+
+/**
+ * Simulation handle. Mutable state lives here so stepSim stays a pure
+ * function of (sim, keymask). Treat as opaque outside this package.
+ */
 export interface Sim {
   world: World;
-  /** Number of fixed steps taken since creation. Sim time = stepIndex * SIM_DT. */
-  stepIndex: number;
-  velocityIterations: number;
-  positionIterations: number;
+  tune: BikeTune;
+  track: TrackInfo;
+  parTimeMs: number | undefined;
+
+  ground: Body;
+  chassis: Body;
+  rearWheel: Body;
+  frontWheel: Body;
+  headFixture: Fixture;
+  rearJoint: WheelJoint;
+  frontJoint: WheelJoint;
+
+  /** Number of fixed steps taken since creation. Sim time = tick * SIM_DT. */
+  tick: number;
+  prevKeymask: Keymask;
+  /** Decaying lean torque (X-Moto attitude pattern). */
+  attitude: number;
+  /** Head world position after the previous step, for the swept death check. */
+  prevHeadX: number;
+  prevHeadY: number;
+  /** Largest ground-contact normal impulse recorded by post-solve this step. */
+  tickMaxImpulse: number;
+  /** True once the head sensor began touching ground (set by listener). */
+  headContact: boolean;
+
+  /** Ticks remaining in the post-crash freeze; 0 = riding. */
+  freezeTicks: number;
+  /** Index into track.checkpoints of the latest checkpoint reached. */
+  checkpointIndex: number;
+
+  score: ScoreState;
+  finished: boolean;
+  /** Tick at which the run finished (finish bonus already applied). */
+  finishTick: number;
 }
 
+export interface BodyPose {
+  x: number;
+  y: number;
+  angle: number;
+}
+
+/** Everything the renderer needs. Plain data only — no Planck objects. */
 export interface SimSnapshot {
-  stepIndex: number;
-  /** Simulation time in seconds (stepIndex * SIM_DT) — never wall-clock. */
+  chassis: BodyPose;
+  rearWheel: BodyPose;
+  frontWheel: BodyPose;
+  /** Rider head (sensor center) in world coordinates. */
+  head: { x: number; y: number };
+
+  score: number;
+  combo: number;
+  flips: number;
+  backflips: number;
+  frontflips: number;
+  crashes: number;
+  /** Total fully-airborne ticks this run. */
+  airTicks: number;
+  grounded: boolean;
+  rearGrounded: boolean;
+  frontGrounded: boolean;
+  /** Current wheelie streak in ticks. */
+  wheelieTicks: number;
+  /** True while frozen after a crash (pre-respawn). */
+  crashed: boolean;
+  finished: boolean;
+  tick: number;
+  /** Simulation time in seconds (tick * SIM_DT) — never wall-clock. */
   simTime: number;
+}
+
+/** Result of a headless replay — what the server persists and ranks. */
+export interface FinalResult {
+  score: number;
+  /** Finish time if finished, else total simulated time. Ms of sim time. */
+  timeMs: number;
+  ticks: number;
+  flips: number;
+  backflips: number;
+  frontflips: number;
+  crashes: number;
+  finished: boolean;
+  simVersion: number;
+  finalChassis: BodyPose;
 }

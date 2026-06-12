@@ -11,11 +11,111 @@
         height: 100%;
         overflow: hidden;
         background: #05060a;
+        font-family: monospace;
       }
       #game {
         display: block;
         width: 100vw;
         height: 100vh;
+      }
+      .hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        color: rgba(224, 255, 255, 0.85);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre;
+        pointer-events: none;
+        text-shadow: 0 0 4px #000;
+      }
+      .hud-status {
+        position: fixed;
+        top: 18%;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 42px;
+        font-weight: bold;
+        pointer-events: none;
+        text-shadow: 0 0 12px #000;
+      }
+      .panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 300px;
+        overflow-y: auto;
+        background: rgba(5, 6, 10, 0.88);
+        border-left: 1px solid rgba(0, 229, 255, 0.25);
+        color: #e0ffff;
+        font-size: 11px;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .panel-title {
+        font-size: 13px;
+        letter-spacing: 2px;
+        color: #00e5ff;
+        margin-bottom: 8px;
+      }
+      .panel-row {
+        display: grid;
+        grid-template-columns: 110px 1fr 44px;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 4px;
+      }
+      .panel-row input[type="range"] {
+        width: 100%;
+        accent-color: #00e5ff;
+      }
+      .panel-value {
+        text-align: right;
+        color: #ffb000;
+      }
+      .panel button,
+      .selftest-btn {
+        margin-top: 8px;
+        background: #0a1420;
+        color: #00e5ff;
+        border: 1px solid #00e5ff;
+        font-family: monospace;
+        font-size: 12px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .selftest-btn {
+        position: fixed;
+        bottom: 14px;
+        left: 12px;
+      }
+      .selftest-overlay {
+        position: fixed;
+        top: 8%;
+        left: 0;
+        right: 300px;
+        text-align: center;
+        font-size: 18px;
+        font-weight: bold;
+        white-space: pre;
+        pointer-events: none;
+        text-shadow: 0 0 10px #000;
+      }
+      .selftest-overlay:empty {
+        display: none;
+      }
+      .selftest-overlay.recording {
+        color: #ffb000;
+      }
+      .selftest-overlay.pass {
+        color: #00ff88;
+        font-size: 26px;
+      }
+      .selftest-overlay.fail {
+        color: #ff3c3c;
+        font-size: 26px;
       }
     </style>
   </head>
