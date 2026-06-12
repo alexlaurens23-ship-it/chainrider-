@@ -59,6 +59,8 @@ export interface BikeTune {
   attitudeMin: number;
   /** Max |chassis angular velocity| while fully airborne, rad/s. Grounded spin is uncapped. */
   chassisSpinCap: number;
+  /** Attitude torque multiplier while holding lean-forward in a wheelie (rear down, front up). */
+  wheelieRecoveryBoost: number;
   /** Linear impulse along chassis-up applied on jump press while grounded, N·s. */
   jumpImpulse: number;
   headRadius: number;
@@ -93,6 +95,7 @@ export const DEFAULT_TUNE: BikeTune = {
   attitudeDecay: 0.42,
   attitudeMin: 5.5,
   chassisSpinCap: 6.5,
+  wheelieRecoveryBoost: 1.7,
   jumpImpulse: 5,
   headRadius: 0.18,
   headOffsetX: 0.1,

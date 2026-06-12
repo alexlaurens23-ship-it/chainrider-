@@ -293,7 +293,17 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   // Lean: X-Moto attitude pattern — set while held, decay toward zero after.
   if (leanDir !== 0) sim.attitude = leanDir * tune.attitudeTorque;
   if (sim.attitude !== 0) {
-    sim.chassis.applyTorque(sim.attitude, true);
+    let applied = sim.attitude;
+    // Wheelie recovery assist: holding lean-forward with the rear wheel down
+    // and the front up gets boosted torque. Decay state is NOT boosted.
+    if (
+      leanDir < 0 &&
+      isWheelGrounded(sim.rearWheel, sim.ground) &&
+      !isWheelGrounded(sim.frontWheel, sim.ground)
+    ) {
+      applied *= tune.wheelieRecoveryBoost;
+    }
+    sim.chassis.applyTorque(applied, true);
     sim.attitude *= tune.attitudeDecay;
     if (Math.abs(sim.attitude) < tune.attitudeMin) sim.attitude = 0;
   }

@@ -24,6 +24,7 @@ const RANGES: Record<keyof BikeTune, Range> = {
   attitudeDecay: [0, 0.95, 0.01],
   attitudeMin: [0, 10, 0.5],
   chassisSpinCap: [1, 20, 0.5],
+  wheelieRecoveryBoost: [1, 4, 0.1],
   jumpImpulse: [0, 50, 0.5],
   headRadius: [0.08, 0.3, 0.01],
   headOffsetX: [-0.5, 0.5, 0.05],
