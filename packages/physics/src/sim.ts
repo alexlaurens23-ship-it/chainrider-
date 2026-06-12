@@ -1,16 +1,21 @@
 import { Box, Chain, Circle, Vec2, WheelJoint, World } from "planck";
 import type { Body } from "planck";
 import {
+  ANTI_WHEELIE_END,
+  ANTI_WHEELIE_START,
   CHECKPOINT_FRACTION,
   CRASH_FREEZE_TICKS,
   FINISH_FLAG_OFFSET,
   GRAVITY_X,
   GRAVITY_Y,
+  HILL_ASSIST_MIN_SLOPE,
   KILL_FLOOR_DROP,
   LEAD_IN_METERS,
   POSITION_ITERATIONS,
   RUN_OUT_METERS,
   SIM_DT,
+  STABILIZER_LEAN_FACTOR,
+  TORQUE_CURVE_KNEE,
   VELOCITY_ITERATIONS,
 } from "./constants";
 import { createScoreState, resetScoreStreaks, updateScore } from "./scoring";
@@ -272,6 +277,28 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   const leanDir =
     ((keymask & INPUT.LEAN_LEFT) !== 0 ? 1 : 0) - ((keymask & INPUT.LEAN_RIGHT) !== 0 ? 1 : 0);
 
+  // Grounded state as of the last step's contacts — shared by the drive
+  // shaping, wheelie boost, stabilizer, hill assist, and jump below. The whole
+  // arcade layer is gated on it: fully airborne ticks run the exact pre-P2.1
+  // code paths (locked air feel).
+  const rearOnGround = isWheelGrounded(sim.rearWheel, sim.ground);
+  const frontOnGround = isWheelGrounded(sim.frontWheel, sim.ground);
+  const anyOnGround = rearOnGround || frontOnGround;
+
+  // Terrain slope under the bike: slope under each wheel, direction-averaged.
+  // pitchError > 0 = nose-up relative to the slope (riding +x).
+  let groundSlope = 0;
+  let pitchError = 0;
+  if (anyOnGround) {
+    const rearSlope = terrainSlopeAt(sim.track.terrain, sim.rearWheel.getPosition().x);
+    const frontSlope = terrainSlopeAt(sim.track.terrain, sim.frontWheel.getPosition().x);
+    groundSlope = Math.atan2(
+      Math.sin(rearSlope) + Math.sin(frontSlope),
+      Math.cos(rearSlope) + Math.cos(frontSlope),
+    );
+    pitchError = wrapAngle(sim.chassis.getAngle() - groundSlope);
+  }
+
   // Drive / brake (brake overrides throttle; X-Moto-style strong stop).
   if (brake) {
     sim.rearJoint.setMotorSpeed(0);
@@ -282,8 +309,28 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   } else {
     sim.frontJoint.enableMotor(false);
     if (throttle) {
+      let motorTorque = tune.maxMotorTorque;
+      if (anyOnGround) {
+        // Torque curve: full punch up to the knee, then linear falloff to
+        // torqueFalloffFloor at maxOmega — kills wheelie torque at speed.
+        const spin = Math.min(1, Math.abs(sim.rearWheel.getAngularVelocity()) / tune.maxOmega);
+        if (spin > TORQUE_CURVE_KNEE) {
+          const t = (spin - TORQUE_CURVE_KNEE) / (1 - TORQUE_CURVE_KNEE);
+          motorTorque *= 1 + (tune.torqueFalloffFloor - 1) * t;
+        }
+        // Anti-wheelie bias: pitching up past the slope tapers torque toward
+        // antiWheelieFloor. Holding lean-back bypasses it — deliberate
+        // wheelies keep full drive.
+        if (leanDir <= 0 && pitchError > ANTI_WHEELIE_START) {
+          const t = Math.min(
+            1,
+            (pitchError - ANTI_WHEELIE_START) / (ANTI_WHEELIE_END - ANTI_WHEELIE_START),
+          );
+          motorTorque *= 1 + (tune.antiWheelieFloor - 1) * t;
+        }
+      }
       sim.rearJoint.setMotorSpeed(-tune.maxOmega);
-      sim.rearJoint.setMaxMotorTorque(tune.maxMotorTorque);
+      sim.rearJoint.setMaxMotorTorque(motorTorque);
     } else {
       sim.rearJoint.setMotorSpeed(0);
       sim.rearJoint.setMaxMotorTorque(0); // freewheel
@@ -296,11 +343,7 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
     let applied = sim.attitude;
     // Wheelie recovery assist: holding lean-forward with the rear wheel down
     // and the front up gets boosted torque. Decay state is NOT boosted.
-    if (
-      leanDir < 0 &&
-      isWheelGrounded(sim.rearWheel, sim.ground) &&
-      !isWheelGrounded(sim.frontWheel, sim.ground)
-    ) {
+    if (leanDir < 0 && rearOnGround && !frontOnGround) {
       applied *= tune.wheelieRecoveryBoost;
     }
     sim.chassis.applyTorque(applied, true);
@@ -308,12 +351,36 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
     if (Math.abs(sim.attitude) < tune.attitudeMin) sim.attitude = 0;
   }
 
+  // Grounded auto-stabilizer: PD torque pulling the chassis toward the local
+  // terrain slope. Lean input keeps 30% authority so deliberate wheelies and
+  // manuals stay possible — accidental ones don't. Off while fully airborne
+  // and during the crash freeze (a downed bike must not right itself).
+  if (anyOnGround && !frozen) {
+    const gain = leanDir !== 0 ? STABILIZER_LEAN_FACTOR : 1;
+    sim.chassis.applyTorque(
+      gain *
+        (-tune.stabilizerStrength * pitchError -
+          tune.stabilizerDamping * sim.chassis.getAngularVelocity()),
+      true,
+    );
+  }
+
+  // Hill traction assist: throttling up a steep slope adds a force along the
+  // surface cancelling hillAssist × the gravity component — the arcade cheat
+  // that makes steep chart sections climbable. Zero downhill, zero in air.
+  if (anyOnGround && throttle && groundSlope > HILL_ASSIST_MIN_SLOPE) {
+    const totalMass = sim.chassis.getMass() + sim.rearWheel.getMass() + sim.frontWheel.getMass();
+    const force = tune.hillAssist * totalMass * -GRAVITY_Y * Math.sin(groundSlope);
+    sim.chassis.applyForce(
+      new Vec2(force * Math.cos(groundSlope), force * Math.sin(groundSlope)),
+      sim.chassis.getWorldCenter(),
+      true,
+    );
+  }
+
   // Jump: edge-triggered, needs ground contact (state as of the last step).
   const jumpPressed = (keymask & INPUT.JUMP) !== 0 && (sim.prevKeymask & INPUT.JUMP) === 0;
-  if (
-    jumpPressed &&
-    (isWheelGrounded(sim.rearWheel, sim.ground) || isWheelGrounded(sim.frontWheel, sim.ground))
-  ) {
+  if (jumpPressed && anyOnGround) {
     const up = sim.chassis.getWorldVector(new Vec2(0, 1));
     sim.chassis.applyLinearImpulse(
       new Vec2(up.x * tune.jumpImpulse, up.y * tune.jumpImpulse),

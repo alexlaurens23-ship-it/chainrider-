@@ -61,6 +61,16 @@ export interface BikeTune {
   chassisSpinCap: number;
   /** Attitude torque multiplier while holding lean-forward in a wheelie (rear down, front up). */
   wheelieRecoveryBoost: number;
+  /** PD auto-level P gain pulling the grounded chassis toward the terrain slope, N·m/rad. */
+  stabilizerStrength: number;
+  /** PD auto-level D gain on chassis angular velocity while grounded, N·m·s/rad. */
+  stabilizerDamping: number;
+  /** Motor torque fraction left at maxOmega (taper is linear from TORQUE_CURVE_KNEE). */
+  torqueFalloffFloor: number;
+  /** Fraction of m·g·sin(slope) pushed along the surface while throttling uphill past 15°. */
+  hillAssist: number;
+  /** Motor torque fraction at ≥50° nose-up vs slope (scales from 25°; lean-back bypasses). */
+  antiWheelieFloor: number;
   /** Linear impulse along chassis-up applied on jump press while grounded, N·s. */
   jumpImpulse: number;
   headRadius: number;
@@ -88,7 +98,7 @@ export const DEFAULT_TUNE: BikeTune = {
   suspensionHz: 5,
   suspensionDamping: 0.85,
   maxOmega: 62,
-  maxMotorTorque: 60,
+  maxMotorTorque: 41,
   rearBrakeTorque: 55,
   frontBrakeTorque: 23,
   attitudeTorque: 70,
@@ -96,6 +106,11 @@ export const DEFAULT_TUNE: BikeTune = {
   attitudeMin: 8.5,
   chassisSpinCap: 6.5,
   wheelieRecoveryBoost: 1.7,
+  stabilizerStrength: 90,
+  stabilizerDamping: 12,
+  torqueFalloffFloor: 0.35,
+  hillAssist: 0.45,
+  antiWheelieFloor: 0.4,
   jumpImpulse: 5,
   headRadius: 0.18,
   headOffsetX: 0.1,

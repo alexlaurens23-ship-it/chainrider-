@@ -61,6 +61,7 @@ packages/
     src/terrain.ts            Pure polyline geometry: y/slope at x, wrapAngle, swept head-circle death check.
     src/constants.ts          SIM_DT, gravity, iterations, SIM_VERSION (bump on any physics/scoring change), lead-in/run-out/checkpoint/freeze constants.
     src/types.ts              INPUT bitmask (1 thr/2 brk/4 leanL/8 leanR/16 jump), BikeTune + DEFAULT_TUNE, Sim, SimSnapshot, TrackInfo, FinalResult.
+    test/grounded.test.ts     Vitest (`npm test -w @chainrider/physics`): 30° incline climb (pitch ≤35°) + bit-identical replay.
 apps/
   web/                        Vite + vanilla TS. Tuning playground (the only screen for now).
     vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787.
@@ -97,6 +98,8 @@ _Update at the end of every session._
 - Tuning pass (2026-06-12): **locked tune v1** is the new `DEFAULT_TUNE` (chassisDensity 10, attitudeTorque 70, wheelRadius 0.34, groundFriction 1.45, etc. — found in the playground; DEFAULT_TUNE in `packages/physics/src/types.ts` is now the source of truth, Appendix A keeps the original research starting values). New tune param `chassisSpinCap` (default 6.5 rad/s): chassis angular velocity clamped to ±cap **only while fully airborne**, applied post-step; grounded dynamics untouched. `SIM_VERSION=3`. Verified: `npm run verify` clean + bit-identical double replay in Node.
 - Wheelie recovery assist (2026-06-12): new tune param `wheelieRecoveryBoost` (default 1.7) — applied attitude torque is multiplied by it while holding lean-forward with rear wheel grounded + front airborne (decay state not boosted; all other states unchanged). Slider added. `SIM_VERSION=4`. Verified: verify clean + bit-identical double replay.
 - **P2 complete — tune locked** (2026-06-12): final DEFAULT_TUNE locked from the playground (only delta from v1: attitudeMin 5.5 → **8.5**; wheelieRecoveryBoost 1.7 + chassisSpinCap 6.5 included). `SIM_VERSION=5`. Verified: verify clean + determinism smoke ×10 bit-identical.
+
+- **P2.1 — arcade grounded stabilization layer** (2026-06-12): four grounded-only assists in `stepSim`, every one gated on ≥1 wheel grounded (fully-airborne ticks run the pre-P2.1 code paths — locked air feel untouched): (1) PD auto-stabilizer pulling chassis toward the direction-averaged terrain slope under the wheels (`stabilizerStrength` 90, `stabilizerDamping` 12; any lean input drops authority to 30% so deliberate wheelies/manuals win; off during crash freeze), (2) motor torque taper — full to 40% of maxOmega, then linear to `torqueFalloffFloor` 0.35 at maxOmega, (3) hill traction assist — throttle uphill >15°: force along surface = `hillAssist` 0.45 × m·g·sin(slope); zero downhill/in air, (4) anti-wheelie bias — grounded throttle torque scaled linearly to `antiWheelieFloor` 0.4 between 25°→50° nose-up vs slope, bypassed entirely while lean-back held. `maxMotorTorque` 60 → **41**. `SIM_VERSION=6`. New vitest suite in `packages/physics/test/` (vitest devDep). Verified: verify clean, tests pass (climb reaches top with ≤8° pitch error), 10× dist replay bit-identical, flat full-throttle max pitch 9.5° vs deliberate wheelie unrestricted.
 
 **In progress**
 - Nothing.

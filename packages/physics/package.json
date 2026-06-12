@@ -23,13 +23,15 @@
   ],
   "scripts": {
     "build": "tsup",
-    "verify": "tsc --noEmit"
+    "verify": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "planck": "1.5.0"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
   }
 }
