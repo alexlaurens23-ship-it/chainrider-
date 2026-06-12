@@ -74,7 +74,7 @@ export interface BikeTune {
   groundFriction: number;
 }
 
-/** Locked tune v1 — found in the playground (2026-06-12). Source of truth over Appendix A. */
+/** Locked tune (P2 final, 2026-06-12) — found in the playground. Source of truth over Appendix A. */
 export const DEFAULT_TUNE: BikeTune = {
   chassisWidth: 1.9,
   chassisHeight: 0.55,
@@ -93,7 +93,7 @@ export const DEFAULT_TUNE: BikeTune = {
   frontBrakeTorque: 23,
   attitudeTorque: 70,
   attitudeDecay: 0.42,
-  attitudeMin: 5.5,
+  attitudeMin: 8.5,
   chassisSpinCap: 6.5,
   wheelieRecoveryBoost: 1.7,
   jumpImpulse: 5,

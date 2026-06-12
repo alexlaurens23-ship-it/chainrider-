@@ -14,7 +14,7 @@ export const POSITION_ITERATIONS = 3;
  * scoring rules, tune defaults, terrain construction, or the input bit layout —
  * the server rejects runs whose simVersion it cannot reproduce.
  */
-export const SIM_VERSION = 4;
+export const SIM_VERSION = 5;
 
 /** Flat terrain extensions around the chart polyline, in meters. */
 export const LEAD_IN_METERS = 20;

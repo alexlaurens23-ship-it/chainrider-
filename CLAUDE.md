@@ -96,6 +96,7 @@ _Update at the end of every session._
 
 - Tuning pass (2026-06-12): **locked tune v1** is the new `DEFAULT_TUNE` (chassisDensity 10, attitudeTorque 70, wheelRadius 0.34, groundFriction 1.45, etc. — found in the playground; DEFAULT_TUNE in `packages/physics/src/types.ts` is now the source of truth, Appendix A keeps the original research starting values). New tune param `chassisSpinCap` (default 6.5 rad/s): chassis angular velocity clamped to ±cap **only while fully airborne**, applied post-step; grounded dynamics untouched. `SIM_VERSION=3`. Verified: `npm run verify` clean + bit-identical double replay in Node.
 - Wheelie recovery assist (2026-06-12): new tune param `wheelieRecoveryBoost` (default 1.7) — applied attitude torque is multiplied by it while holding lean-forward with rear wheel grounded + front airborne (decay state not boosted; all other states unchanged). Slider added. `SIM_VERSION=4`. Verified: verify clean + bit-identical double replay.
+- **P2 complete — tune locked** (2026-06-12): final DEFAULT_TUNE locked from the playground (only delta from v1: attitudeMin 5.5 → **8.5**; wheelieRecoveryBoost 1.7 + chassisSpinCap 6.5 included). `SIM_VERSION=5`. Verified: verify clean + determinism smoke ×10 bit-identical.
 
 **In progress**
 - Nothing.
