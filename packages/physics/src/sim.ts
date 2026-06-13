@@ -217,27 +217,12 @@ export function createSim(
     attitude: 0,
     prevHeadX: head.x,
     prevHeadY: head.y,
-    tickMaxImpulse: 0,
-    headContact: false,
     freezeTicks: 0,
     checkpointIndex: 0,
     score: createScoreState(),
     finished: false,
     finishTick: -1,
   };
-
-  // Hard-landing detector: remember the biggest bike-vs-ground normal impulse
-  // each step; stepSim combines it with the chassis-vs-slope angle.
-  world.on("post-solve", (contact, impulse) => {
-    const bodyA = contact.getFixtureA().getBody();
-    const bodyB = contact.getFixtureB().getBody();
-    if (bodyA !== sim.ground && bodyB !== sim.ground) return;
-    const other = bodyA === sim.ground ? bodyB : bodyA;
-    if (other !== sim.chassis && other !== sim.rearWheel && other !== sim.frontWheel) return;
-    for (const n of impulse.normalImpulses) {
-      if (n > sim.tickMaxImpulse) sim.tickMaxImpulse = n;
-    }
-  });
 
   return sim;
 }
@@ -390,7 +375,6 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   }
 
   const prevAngle = sim.chassis.getAngle();
-  sim.tickMaxImpulse = 0;
 
   sim.world.step(SIM_DT, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
   sim.tick += 1;
@@ -415,6 +399,9 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   const landingAligned =
     Math.abs(wrapAngle(angle - slope)) <= (tune.landingToleranceDeg * Math.PI) / 180;
 
+  // Crash fires ONLY on head-vs-track contact (sensor touch or the swept head
+  // circle) or falling into the void below killY. The chassis box and wheels
+  // resting, grazing, or bottoming out on terrain at any angle is never a crash.
   let crashed = false;
   if (!frozen && !sim.finished) {
     if (
@@ -429,8 +416,6 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
       ) ||
       pos.y < sim.track.killY
     ) {
-      crashed = true;
-    } else if (sim.tickMaxImpulse > tune.hardLandingImpulse && !landingAligned) {
       crashed = true;
     }
   }

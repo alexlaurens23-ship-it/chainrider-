@@ -167,10 +167,6 @@ export interface Sim {
   /** Head world position after the previous step, for the swept death check. */
   prevHeadX: number;
   prevHeadY: number;
-  /** Largest ground-contact normal impulse recorded by post-solve this step. */
-  tickMaxImpulse: number;
-  /** True once the head sensor began touching ground (set by listener). */
-  headContact: boolean;
 
   /** Ticks remaining in the post-crash freeze; 0 = riding. */
   freezeTicks: number;

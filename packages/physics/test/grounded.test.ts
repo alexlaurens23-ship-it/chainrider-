@@ -50,6 +50,30 @@ describe("grounded stabilization layer", () => {
     expect(worstPitchError).toBeLessThanOrEqual(MAX_PITCH_ERROR);
   });
 
+  it("a hard landing on the wheels is never a crash (head-only crash rule)", () => {
+    // Flat run-up, a sheer 8 m drop, then a long flat landing. Driving off the
+    // edge at speed produces a hard wheel/chassis impact — which used to trip
+    // the removed hard-landing-impulse crash. Now only the head touching the
+    // track may crash, so a wheels-down landing must keep crashes at 0.
+    const DROP_TRACK: TrackPoint[] = [
+      [0, 0],
+      [24, 0],
+      [25, -8],
+      [120, -8],
+    ];
+    const sim = createSim(DROP_TRACK);
+    let landedGrounded = false;
+    for (let i = 0; i < 600; i++) {
+      stepSim(sim, INPUT.THROTTLE);
+      const snap = getSnapshot(sim);
+      // Confirm the no-crash result is meaningful: the bike actually settles on
+      // the lower flat (grounded, past the drop), not still flying.
+      if (snap.chassis.x > 40 && snap.grounded) landedGrounded = true;
+    }
+    expect(getSnapshot(sim).crashes).toBe(0);
+    expect(landedGrounded).toBe(true);
+  });
+
   it("replays bit-identically over the incline (determinism)", () => {
     const log: InputLogEntry[] = [
       [0, INPUT.THROTTLE],
