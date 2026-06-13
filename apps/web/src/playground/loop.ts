@@ -15,16 +15,22 @@ interface Recording {
   lastMask: number;
 }
 
+/** Stop the playground: cancel its RAF and remove its listeners. */
+export interface PlaygroundHandle {
+  unmount(): void;
+}
+
 /**
  * Tuning playground. All physics and scoring live in @chainrider/physics —
  * this loop only samples keymasks, calls stepSim, and draws snapshots.
+ * Mounts its canvas + overlays into `root` and returns a teardown handle.
  */
-export function startPlayground(): void {
-  const canvasEl = document.querySelector<HTMLCanvasElement>("#game");
-  if (!canvasEl) throw new Error("missing #game canvas");
-  const renderCtx = canvasEl.getContext("2d");
+export function startPlayground(root: HTMLElement): PlaygroundHandle {
+  const canvas = document.createElement("canvas");
+  canvas.className = "game-canvas";
+  root.appendChild(canvas);
+  const renderCtx = canvas.getContext("2d");
   if (!renderCtx) throw new Error("Canvas2D not supported");
-  const canvas: HTMLCanvasElement = canvasEl;
   const ctx: CanvasRenderingContext2D = renderCtx;
 
   let tune: BikeTune = { ...DEFAULT_TUNE };
@@ -35,8 +41,8 @@ export function startPlayground(): void {
   let recording: Recording | null = null;
 
   const input = createInput();
-  const hud = createHud(document.body);
-  const selfTest = createSelfTest(document.body);
+  const hud = createHud(root);
+  const selfTest = createSelfTest(root);
 
   function rebuild(): void {
     sim = createSim(TEST_TRACK, tune);
@@ -50,7 +56,7 @@ export function startPlayground(): void {
   }
 
   input.onReset(rebuild);
-  createPanel(document.body, (next) => {
+  createPanel(root, (next) => {
     tune = next;
     rebuild();
   });
@@ -72,8 +78,11 @@ export function startPlayground(): void {
   let last = performance.now();
   let accumulator = 0;
   let fps = 60;
+  let rafId = 0;
+  let stopped = false;
 
   function frame(now: number): void {
+    if (stopped) return;
     let frameTime = (now - last) / 1000;
     last = now;
     if (frameTime > MAX_FRAME_S) frameTime = MAX_FRAME_S;
@@ -110,7 +119,16 @@ export function startPlayground(): void {
     });
     hud.update(curr, fps);
 
-    requestAnimationFrame(frame);
+    rafId = requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
+
+  return {
+    unmount() {
+      stopped = true;
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", resize);
+      input.dispose();
+    },
+  };
 }

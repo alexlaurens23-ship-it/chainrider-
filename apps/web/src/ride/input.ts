@@ -13,18 +13,26 @@ const KEY_BITS: Record<string, number> = {
   Space: INPUT.JUMP,
 };
 
-export interface PlaygroundInput {
+export interface RideInput {
   /** Current keymask. The loop samples this exactly once per fixed step. */
   mask(): Keymask;
-  /** Called when the user presses R. */
-  onReset(cb: () => void): void;
-  /** Remove window listeners (call on unmount). */
+  /** Remove all window listeners (call on unmount). */
   dispose(): void;
 }
 
-export function createInput(): PlaygroundInput {
+export interface RideInputHandlers {
+  onRespawn(): void;
+  onMute(): void;
+  onQuit(): void;
+}
+
+/**
+ * Keyboard → keymask for the ride screen. Same bit layout as the playground,
+ * plus R (respawn), M (mute), Esc (quit). Returns dispose() so the router can
+ * tear down listeners cleanly.
+ */
+export function createRideInput(handlers: RideInputHandlers): RideInput {
   let mask = 0;
-  let resetCb: (() => void) | null = null;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
@@ -32,9 +40,11 @@ export function createInput(): PlaygroundInput {
     if (bit) {
       mask |= bit;
       e.preventDefault();
-    } else if (e.code === "KeyR") {
-      resetCb?.();
+      return;
     }
+    if (e.code === "KeyR") handlers.onRespawn();
+    else if (e.code === "KeyM") handlers.onMute();
+    else if (e.code === "Escape") handlers.onQuit();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
     const bit = KEY_BITS[e.code];
@@ -43,7 +53,6 @@ export function createInput(): PlaygroundInput {
       e.preventDefault();
     }
   };
-  // Don't carry stale input across focus loss.
   const onBlur = (): void => {
     mask = 0;
   };
@@ -54,9 +63,6 @@ export function createInput(): PlaygroundInput {
 
   return {
     mask: () => mask,
-    onReset: (cb) => {
-      resetCb = cb;
-    },
     dispose() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);

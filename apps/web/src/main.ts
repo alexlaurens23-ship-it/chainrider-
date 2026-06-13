@@ -1,5 +1,5 @@
-import { startPlayground } from "./playground/loop";
+import { startRouter } from "./router";
 
-// The tuning playground is the only screen for now — it mounts for both the
-// bare URL and /#playground.
-startPlayground();
+const app = document.getElementById("app");
+if (!app) throw new Error("missing #app root");
+startRouter(app);

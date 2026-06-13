@@ -1,4 +1,5 @@
 import type { BikeTune, SimSnapshot, TrackInfo } from "@chainrider/physics";
+import { drawBike } from "../shared/bike";
 
 const PX_PER_METER = 26;
 /** Camera leads the bike a little in the riding direction. */
@@ -88,65 +89,6 @@ export function render(
     ctx.stroke();
   }
 
-  // Bike — interpolated poses, primitive shapes for now.
-  drawWheel(ctx, toX, toY, prev, curr, alpha, "rearWheel", tune.wheelRadius);
-  drawWheel(ctx, toX, toY, prev, curr, alpha, "frontWheel", tune.wheelRadius);
-
-  const cx = toX(lerp(prev.chassis.x, curr.chassis.x, alpha));
-  const cy = toY(lerp(prev.chassis.y, curr.chassis.y, alpha));
-  const cAngle = lerp(prev.chassis.angle, curr.chassis.angle, alpha);
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-cAngle); // y-flip inverts rotation direction on screen
-  ctx.strokeStyle = curr.crashed ? "#ff3c3c" : "#e0ffff";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(
-    (-tune.chassisWidth / 2) * PX_PER_METER,
-    (-tune.chassisHeight / 2) * PX_PER_METER,
-    tune.chassisWidth * PX_PER_METER,
-    tune.chassisHeight * PX_PER_METER,
-  );
-  ctx.restore();
-
-  // Head
-  const hx = toX(lerp(prev.head.x, curr.head.x, alpha));
-  const hy = toY(lerp(prev.head.y, curr.head.y, alpha));
-  ctx.strokeStyle = curr.crashed ? "#ff3c3c" : "#ffb000";
-  ctx.beginPath();
-  ctx.arc(hx, hy, tune.headRadius * PX_PER_METER, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(hx, hy);
-  ctx.stroke();
-}
-
-function drawWheel(
-  ctx: CanvasRenderingContext2D,
-  toX: (wx: number) => number,
-  toY: (wy: number) => number,
-  prev: SimSnapshot,
-  curr: SimSnapshot,
-  alpha: number,
-  key: "rearWheel" | "frontWheel",
-  radius: number,
-): void {
-  const x = toX(lerp(prev[key].x, curr[key].x, alpha));
-  const y = toY(lerp(prev[key].y, curr[key].y, alpha));
-  const angle = -lerp(prev[key].angle, curr[key].angle, alpha);
-  const r = radius * PX_PER_METER;
-  const grounded = key === "rearWheel" ? curr.rearGrounded : curr.frontGrounded;
-
-  ctx.strokeStyle = grounded ? "#00ff88" : "#7df9ff";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.stroke();
-  // Spokes so rotation is visible
-  ctx.beginPath();
-  for (const off of [0, Math.PI / 2]) {
-    ctx.moveTo(x - Math.cos(angle + off) * r, y - Math.sin(angle + off) * r);
-    ctx.lineTo(x + Math.cos(angle + off) * r, y + Math.sin(angle + off) * r);
-  }
-  ctx.stroke();
+  // Bike — interpolated poses (shared with the ride screen).
+  drawBike(ctx, { toX, toY, scale: PX_PER_METER, prev, curr, alpha, tune });
 }

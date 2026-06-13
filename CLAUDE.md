@@ -63,24 +63,32 @@ packages/
     src/types.ts              INPUT bitmask (1 thr/2 brk/4 leanL/8 leanR/16 jump), BikeTune + DEFAULT_TUNE, Sim, SimSnapshot, TrackInfo, FinalResult.
     test/grounded.test.ts     Vitest (`npm test -w @chainrider/physics`): 30° incline climb (pitch ≤35°) + bit-identical replay.
 apps/
-  web/                        Vite + vanilla TS. Tuning playground (the only screen for now).
+  web/                        Vite + vanilla TS. Hash-routed SPA: #/ home, #/map/:slug/:period, #/ride/:trackId, #/playground.
     vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787.
-    src/main.ts               Mounts the playground.
-    src/net.ts                Typed apiFetch helper + getHealth. Dev proxy /api -> :8787.
-    src/playground/loop.ts    Fixed-timestep accumulator + render interpolation; records input log; orchestrates everything.
-    src/playground/track.ts   Hardcoded TEST_TRACK (flat→ramp→gap→bumps→big jump).
-    src/playground/input.ts   Keyboard → keymask (W/S/A/D/arrows/Space, R reset).
-    src/playground/render.ts  Canvas2D camera-follow renderer, primitive bike shapes.
-    src/playground/panel.ts   Hand-rolled slider per BikeTune key; rebuilds sim on change.
-    src/playground/hud.ts     Score/combo/flips/crashes/FPS/tick + api health.
-    src/playground/selftest.ts DETERMINISM SELF-TEST: 600 live ticks vs simulateReplay, PASS/FAIL overlay.
-  api/                        Fastify on :8787 (ESM, tsx dev). Track pipeline live.
+    index.html                #app root + full <style> (palette, pages, ride HUD, run-complete card).
+    src/main.ts               Mounts the router into #app.
+    src/router.ts             Hash router: parse #hash → screen {mount(root,params)/unmount()}; toggles body.no-scroll for game screens.
+    src/net.ts                apiFetch + typed fetchers (getMaps/getTrack/getStats/getLeaderboard/submitRun) + in-memory maps/track caches.
+    src/ui/format.ts          difficultyColor, formatSol/Score/Clock/Countdown.
+    src/ui/sparkline.ts       drawSparkline (home cards). ui/chartPreview.ts: drawChartPreview (map detail, green-up/red-down + fill).
+    src/shared/bike.ts        drawBike — shared bike renderer (ride + playground).
+    src/screens/home.ts       Hero + live stats strip (/api/stats) + trending cards (sparkline/badge/prize) + UTC payout countdown.
+    src/screens/mapDetail.ts  Chart preview, period tabs (siblings by symbol), RAW/SMOOTH toggle, stats row + prize ladder, leaderboard (empty until P7), RIDE button.
+    src/screens/ride.ts       Wires fetch→loop+renderer+hud+input+run-complete; Submit posts real payload to /api/runs/submit.
+    src/ride/loop.ts          Fixed-timestep ride loop; change-only [tick,keymask] log (P6 replay); maxCombo/air/speed tracking; 20-min (72000-tick) cap; respawn/quit.
+    src/ride/render.ts        Camera (smoothed lookahead + speed zoom 1.0→0.8, kill-floor clamp); terrain culled via binary search (visibleRange) + green/red glow + gradient fill + gridlines; baked minimap + position dot.
+    src/ride/chart.ts         segmentColor (up=green/down=red) + visibleRange (binary-search cull). ride/hud.ts: DOM HUD. ride/input.ts: keymask+R/M/Esc+dispose. ride/runComplete.ts: star card (STAR_FRACTIONS × maxScore) + toast.
+    src/playground/loop.ts    startPlayground(root)→{unmount}; tuning rig under #/playground (uses shared drawBike).
+    src/playground/{track,input,render,panel,hud,selftest}.ts  TEST_TRACK, keymask, renderer, tune sliders, HUD, determinism self-test.
+  api/                        Fastify on :8787 (ESM, tsx dev). Track pipeline + game endpoints live.
     src/trackgen.ts           PURE deterministic generation: downsample/normalize (6m/candle, vol-scaled 25–90m band, 55° global-rescale clamp)/rawTrack/smoothTrack (centripetal Catmull-Rom, 1 vtx/m, monotonic-x guard)/stats/difficultyFor. No I/O, golden-tested.
     src/chartdata.ts          fetchCloses(source, sourceId, period): CoinGecko (daily-bucketed; optional COINGECKO_API_KEY for ALL/days=max) + GeckoTerminal ("network:pool" source_id). Retry ×3 expo backoff, Retry-After honored. ONLY place external APIs are called.
     src/db.ts                 Lazy service-role Supabase client (getDb).
     src/routes/tracks.ts      mapsRoutes (GET /api/maps: active maps + both modes' stats + cr_config prize_ladder) + tracksRoutes (GET /api/tracks/:id: frozen points, served even when inactive).
     src/routes/admin.ts       X-Admin-Key gated (fail closed): POST /maps (fetch→generate raw+smooth v1→insert; difficulty from raw), POST /maps/:id/regenerate (version n+1, old rows only get active=false).
-    src/routes/*.ts           auth/runs/leaderboards/payouts plugin stubs ({todo:true}).
+    src/routes/stats.ts       GET /api/stats: {ridesCompleted, totalSolPaid, config:{windowMinutes,maxScoreDefault}}. Never 500s (Home must render).
+    src/routes/leaderboards.ts GET /:trackId → [] until P7 (top-10 stub). runs.ts: POST /submit accepts real payload incl. input log, stores nothing yet (P6).
+    src/routes/*.ts           auth/payouts plugin stubs ({todo:true}).
     sql/001_track_pipeline.sql Reference DDL for live schema + hardening (freeze trigger, unique indexes, period-constraint widening). Owner applies in Supabase SQL editor.
     scripts/seed-maps.ts      Seeds launch set via admin HTTP API (idempotent, 409=skip, 15s between calls). `npm run seed -w @chainrider/api`.
     scripts/gen-golden.ts     Regenerates golden strings for trackgen tests (only on deliberate algorithm changes).
@@ -112,11 +120,14 @@ _Update at the end of every session._
 
 - **P3 — track pipeline** (2026-06-12): full chart→track pipeline in `apps/api`. Pure deterministic `trackgen.ts` (downsample ≤1000 candles for ALL, normalize 6m/candle + vol-scaled 25–90m band + 55° slope clamp via single global y-rescale, centripetal Catmull-Rom smooth mode resampled 1 vtx/m with monotonic-x guard, stats/difficulty easy<20°/med<32°/hard<45°/insane≥45° from raw) — golden-tested byte-identical (21 vitest tests). `chartdata.ts` fetchers (CoinGecko + GeckoTerminal, retry ×3). Routes: GET /api/maps, GET /api/tracks/:id, admin POST /maps + /maps/:id/regenerate (X-Admin-Key, fail-closed). Discovered the **live Supabase schema pre-exists** (integer ids; cr_tracks has FLAT stats columns point_count/world_length/max_slope_deg/volatility/par_time_ms, NOT jsonb; cr_config prize_ladder is per-difficulty arrays) — code adapted to it; `sql/001_track_pipeline.sql` is reference + optional hardening. **Period vocabulary is uppercase `90D|180D|1Y|ALL`** (live cr_maps check constraint currently allows only 1Y/ALL; widening statement in sql file). Seeded + verified live end-to-end: btc-1y (regenerated to v2; v1 frozen-but-servable confirmed), eth-1y, sol-1y. Verify + tests clean.
 
+- **P4/P5 — playable game UI** (2026-06-13): hash-routed SPA in `apps/web` (router + screen lifecycle replacing the single-canvas mount; playground refactored to `startPlayground(root)→{unmount}` under `#/playground`). **Home** (`#/`): hero, live stats strip from new `GET /api/stats`, trending cards (per-map sparkline from raw track points, difficulty badge, rank-1 SOL prize), UTC-aligned 30-min payout countdown (client-computed). **Map detail** (`#/map/:slug/:period`): full chart preview (green-up/red-down + fill), period tabs (siblings grouped by symbol), RAW/SMOOTH toggle, stats row + prize ladder, top-10 leaderboard (empty-state; `GET /api/leaderboards/:trackId` stubbed `[]`), RIDE button. **Ride** (`#/ride/:trackId`): fetches frozen points → `createSim` → P2 fixed-timestep loop; camera with smoothed lookahead + speed zoom (1.0→0.8) + kill-floor clamp; terrain = the chart, **culled via binary-search `visibleRange`** so per-frame work is bounded by visible segments (verified: 40m window over a 1255-pt track touches <15 segments → offscreen-cache fallback not needed); green/red glow + gradient fill + gridlines; DOM HUD (score/combo/air/clock/minimap/legend); change-only `[tick,keymask]` input log (the P6 replay), 20-min cap; run-complete card (star rating = `STAR_FRACTIONS` × `max_score_per_track_default`, flips/crashes/combo/time grid, Submit posts real payload to stub `POST /api/runs/submit`, Retry, New Track). Zero physics/scoring in web (shared `drawBike` is the only extracted render logic). Verified: `npm run verify` clean (all 4 workspaces), web `vite build` clean (29 modules), API endpoints return correct shapes, dev-server `/api` proxy works end-to-end, terrain-culling logic check passed. **Not browser-verified** (no automation tool in this env): live rendering/camera feel + the actual ride loop need a manual pass at `http://localhost:5180/#/`.
+
 **In progress**
 - Nothing.
 
 **Next**
-- **ALL-period maps blocked**: CoinGecko keyless API 401s on `days=max` (365-day history limit). Owner: get a free demo key → `COINGECKO_API_KEY` in `apps/api/.env`, then re-run `npm run seed -w @chainrider/api` (btc-all/eth-all/sol-all will fill in; 1y maps 409-skip).
+- **Manual browser pass** of the game UI (no automation tool available here): walk `#/` → `#/map/btc-1y/1Y` → `#/ride/3`, confirm camera/terrain glow/HUD/minimap, run a ride to the finish + Submit, and that `#/playground` self-test still PASSes.
+- **ALL-period maps still blocked**: CoinGecko keyless+demo key both 401 on `days=max` (365-day cap is paid-only — confirmed). Decision taken: **add a Binance source** (free, full history via weekly klines) — not yet built. Needs `cr_maps` source check widened to include `binance` + a `chartdata.ts` Binance fetcher.
 - Owner: apply the HARDENING section of `apps/api/sql/001_track_pipeline.sql` in the Supabase SQL editor (freeze trigger, unique indexes, period-constraint widening for 90D/180D memecoin maps).
 - Memecoin maps: paste GeckoTerminal pool addresses into the two placeholders in `apps/api/scripts/seed-maps.ts`.
 - Difficulty calibration: all three 1Y majors land "insane" (real daily candles at 6m spacing are steep) — thresholds or SPACING_M may need a pass once playable.
