@@ -15,10 +15,15 @@ export {
 export { simulateReplay } from "./replay";
 export {
   SCORING,
+  SCORING_CONFIG,
+  computeFinalScore,
   createScoreState,
   updateScore,
+  type FinalScoreInput,
+  type FinalScoreResult,
   type ScoreFrame,
   type ScoreState,
+  type ScoringConfig,
   type ScoringConstants,
 } from "./scoring";
 export { createSim, getSnapshot, getTrackInfo, stepSim } from "./sim";

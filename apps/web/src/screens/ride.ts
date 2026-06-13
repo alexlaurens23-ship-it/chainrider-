@@ -130,6 +130,9 @@ export function createRideScreen(): Screen {
         host,
         {
           score: snap.score,
+          speedScore: snap.speedScore,
+          trickBonus: snap.trickBonus,
+          effectiveTimeMs: snap.effectiveTimeMs || snap.simTime * 1000,
           finished: snap.finished,
           flips: snap.flips,
           backflips: snap.backflips,

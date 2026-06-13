@@ -1,8 +1,11 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getDb } from "../db.js";
-import { difficultyFor } from "../trackgen.js";
+import { TIERS, difficultyFor, type Tier } from "../trackgen.js";
 
 const ID_PATTERN = "^[0-9]+$";
+
+/** The tier whose stats back the legacy `difficulty`/`tracks` fields. */
+const LEGACY_TIER: Tier = "VOLATILE";
 
 interface MapRow {
   id: number;
@@ -11,12 +14,12 @@ interface MapRow {
   name: string;
   source: string;
   period: string;
-  difficulty: string;
 }
 
 interface TrackSummaryRow {
   id: number;
   map_id: number;
+  tier: Tier;
   mode: "raw" | "smooth";
   version: number;
   point_count: number;
@@ -41,14 +44,19 @@ function trackSummary(t: TrackSummaryRow) {
   };
 }
 
-/** GET /api/maps — active maps with both modes' active track stats + prize ladder. */
+/**
+ * GET /api/maps — active maps with all three difficulty tiers (each tier's
+ * raw+smooth stats + prize). Also keeps legacy `difficulty`/`tracks` fields
+ * (backed by the VOLATILE tier) so the pre-tier frontend keeps working until
+ * the tier-selection UI lands.
+ */
 export const mapsRoutes: FastifyPluginAsync = async (app) => {
   app.get("/", async (_req, reply) => {
     const db = getDb();
 
     const mapsRes = await db
       .from("cr_maps")
-      .select("id,slug,symbol,name,source,period,difficulty")
+      .select("id,slug,symbol,name,source,period")
       .eq("active", true)
       .order("created_at", { ascending: true });
     if (mapsRes.error) {
@@ -62,7 +70,9 @@ export const mapsRoutes: FastifyPluginAsync = async (app) => {
       // points intentionally excluded — heavy; clients fetch /api/tracks/:id to play.
       const tracksRes = await db
         .from("cr_tracks")
-        .select("id,map_id,mode,version,point_count,world_length,max_slope_deg,volatility,par_time_ms")
+        .select(
+          "id,map_id,tier,mode,version,point_count,world_length,max_slope_deg,volatility,par_time_ms",
+        )
         .eq("active", true)
         .in(
           "map_id",
@@ -80,22 +90,38 @@ export const mapsRoutes: FastifyPluginAsync = async (app) => {
       app.log.error(cfgRes.error, "cr_config query failed");
       return reply.code(500).send({ error: "database error" });
     }
+    const prizeLadder = (cfgRes.data?.value ?? null) as Record<string, number[]> | null;
 
     return {
       maps: maps.map((m) => {
-        const find = (mode: "raw" | "smooth") =>
-          tracks.find((t) => t.map_id === m.id && t.mode === mode);
-        const raw = find("raw");
-        const smooth = find("smooth");
-        return {
-          ...m,
-          tracks: {
+        const pick = (tier: Tier, mode: "raw" | "smooth") =>
+          tracks.find((t) => t.map_id === m.id && t.tier === tier && t.mode === mode);
+
+        const tiers: Record<string, unknown> = {};
+        for (const tier of TIERS) {
+          const raw = pick(tier, "raw");
+          const smooth = pick(tier, "smooth");
+          tiers[tier] = {
+            prize: prizeLadder?.[tier] ?? null,
             raw: raw ? trackSummary(raw) : null,
             smooth: smooth ? trackSummary(smooth) : null,
+          };
+        }
+
+        // Legacy fields (pre-tier UI): back them with the VOLATILE tier.
+        const legacyRaw = pick(LEGACY_TIER, "raw");
+        const legacySmooth = pick(LEGACY_TIER, "smooth");
+        return {
+          ...m,
+          difficulty: legacyRaw ? difficultyFor(legacyRaw.max_slope_deg) : "insane",
+          tracks: {
+            raw: legacyRaw ? trackSummary(legacyRaw) : null,
+            smooth: legacySmooth ? trackSummary(legacySmooth) : null,
           },
+          tiers,
         };
       }),
-      prizeLadder: cfgRes.data?.value ?? null,
+      prizeLadder,
     };
   });
 };
@@ -118,7 +144,7 @@ export const tracksRoutes: FastifyPluginAsync = async (app) => {
       const res = await db
         .from("cr_tracks")
         .select(
-          "id,map_id,mode,version,points,point_count,world_length,max_slope_deg,volatility,par_time_ms,active,created_at,cr_maps(slug,name)",
+          "id,map_id,tier,mode,version,points,point_count,world_length,max_slope_deg,volatility,par_time_ms,active,created_at,cr_maps(slug,name)",
         )
         .eq("id", req.params.id)
         .maybeSingle();

@@ -5,6 +5,12 @@ const STAR_FRACTIONS = [0.12, 0.28, 0.46, 0.66, 0.9];
 
 export interface RunSummary {
   score: number;
+  /** Speed component (0 on DNF). */
+  speedScore: number;
+  /** Weighted trick component. */
+  trickBonus: number;
+  /** Finish time + crash penalties, ms. */
+  effectiveTimeMs: number;
   finished: boolean;
   flips: number;
   backflips: number;
@@ -37,19 +43,28 @@ export function showRunComplete(
     i < stars ? `<span class="on">★</span>` : `<span class="off">★</span>`,
   ).join("");
 
+  // Score is time-primary: a speed component (from par/effective-time) plus a
+  // small trick garnish. Effective time = ride time + 3 s per crash.
+  const penaltyMs = summary.effectiveTimeMs - summary.timeMs;
+  const timeLine =
+    penaltyMs > 0
+      ? `${formatClock(summary.timeMs)} (+${formatClock(penaltyMs)} crash = ${formatClock(summary.effectiveTimeMs)})`
+      : formatClock(summary.timeMs);
+
   const overlay = document.createElement("div");
   overlay.className = "run-complete";
   overlay.innerHTML = `
     <div class="run-card">
-      <div class="rc-head">${summary.finished ? "FINISH" : "RUN ENDED"}</div>
+      <div class="rc-head">${summary.finished ? "FINISH" : "RUN ENDED — no finish, tricks only"}</div>
       <div class="rc-score">${formatScore(summary.score)}</div>
       <div class="stars">${starHtml}</div>
+      <div class="rc-breakdown">Speed ${formatScore(summary.speedScore)} + Tricks ${formatScore(summary.trickBonus)}</div>
       <div class="rc-grid">
+        <div class="cell"><span class="k">Time</span><span class="v">${timeLine}</span></div>
+        <div class="cell"><span class="k">Crashes</span><span class="v">${summary.crashes}</span></div>
         <div class="cell"><span class="k">Flips</span><span class="v">${summary.flips}</span></div>
         <div class="cell"><span class="k">Back / Front</span><span class="v">${summary.backflips} / ${summary.frontflips}</span></div>
         <div class="cell"><span class="k">Max combo</span><span class="v">x${summary.maxCombo}</span></div>
-        <div class="cell"><span class="k">Crashes</span><span class="v">${summary.crashes}</span></div>
-        <div class="cell"><span class="k">Time</span><span class="v">${formatClock(summary.timeMs)}</span></div>
         <div class="cell"><span class="k">Status</span><span class="v">${summary.finished ? "FINISHED" : "QUIT"}</span></div>
       </div>
       <div class="rc-buttons">

@@ -4,10 +4,34 @@
  * `stepSim` calls `updateScore` exactly once per fixed step with a plain
  * frame of facts; nothing here touches Planck, wall-clock time, or RNG.
  * Bump SIM_VERSION (constants.ts) whenever any rule here changes.
+ *
+ * Model (time-primary): the real score is computed AT FINISH —
+ *   score = speedScore + trickBonus
+ *   speedScore = round(baseFinish * (par / effectiveTime)^speedExp)   [finished only]
+ *   effectiveTime = finishTime + crashes * crashTimePenaltyMs
+ *   trickBonus = round(rawTrickPoints * trickWeight)
+ * A fast clean finish beats a slow trick-stuffed one; a DNF gets trickBonus only.
  */
 
 const TWO_PI = Math.PI * 2;
 
+/** Retune knobs for the time-primary finish formula + per-tier par pace. */
+export const SCORING_CONFIG = {
+  /** Score for finishing exactly at par with no tricks/crashes. */
+  baseFinish: 10000,
+  /** Speed multiplier exponent — >1 richly rewards beating par. */
+  speedExp: 1.5,
+  /** rawTrickPoints are scaled by this at finish — tricks are a garnish. */
+  trickWeight: 0.15,
+  /** Each crash adds this to the effective finish time. */
+  crashTimePenaltyMs: 3000,
+  /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */
+  parPaceMps: { CHILL: 9, VOLATILE: 8, DEGEN: 7 },
+} as const;
+
+export type ScoringConfig = typeof SCORING_CONFIG;
+
+/** Trick-detection values (unchanged) — feed rawTrickPoints, reweighted at finish. */
 export const SCORING = {
   /** +points per `airtimeTickWindow` consecutive fully-airborne ticks (flat, no combo). */
   airtimePoints: 10,
@@ -28,10 +52,6 @@ export const SCORING = {
   /** Tricks within this many ticks of the previous trick grow the combo. */
   comboWindowTicks: 120,
   comboMax: 5,
-  crashPenalty: 100,
-  finishPoints: 1000,
-  /** Total score never drops below this. */
-  scoreFloor: 0,
 } as const;
 
 export type ScoringConstants = typeof SCORING;
@@ -57,7 +77,16 @@ export interface ScoreFrame {
 }
 
 export interface ScoreState {
+  /** Displayed score: live = trickBonus (DNF-equivalent); at finish = speedScore + trickBonus. */
   score: number;
+  /** Speed component, set at finish (0 during the run / on DNF). */
+  speedScore: number;
+  /** Weighted trick component (round(rawTrickPoints * trickWeight)). */
+  trickBonus: number;
+  /** Finish time + crash penalties, ms (set at finish). */
+  effectiveTimeMs: number;
+  /** Un-weighted accumulated trick points (flips/clean/wheelie/airtime × combo). */
+  rawTrickPoints: number;
   /** Current multiplier ×1..×5. */
   combo: number;
   /** Tick of the last combo-building trick; -1 = none yet. */
@@ -81,6 +110,10 @@ export interface ScoreState {
 export function createScoreState(): ScoreState {
   return {
     score: 0,
+    speedScore: 0,
+    trickBonus: 0,
+    effectiveTimeMs: 0,
+    rawTrickPoints: 0,
     combo: 1,
     lastTrickTick: -1,
     flips: 0,
@@ -95,18 +128,53 @@ export function createScoreState(): ScoreState {
   };
 }
 
-/** Combo-building trick: grow ×1→×5 within the window, award base × combo. */
+export interface FinalScoreInput {
+  finished: boolean;
+  /** Finish time in ms (or total sim time on DNF). */
+  finishTimeMs: number;
+  parTimeMs: number | undefined;
+  crashes: number;
+  rawTrickPoints: number;
+}
+
+export interface FinalScoreResult {
+  score: number;
+  speedScore: number;
+  trickBonus: number;
+  effectiveTimeMs: number;
+}
+
+/**
+ * Pure time-primary finish formula. A finished run earns the speed multiplier
+ * (richly for beating par, eroded by crash time penalties) plus a small trick
+ * garnish; a DNF earns the trick garnish only. Tested directly.
+ */
+export function computeFinalScore(input: FinalScoreInput): FinalScoreResult {
+  const trickBonus = Math.round(input.rawTrickPoints * SCORING_CONFIG.trickWeight);
+  if (!input.finished) {
+    return { score: trickBonus, speedScore: 0, trickBonus, effectiveTimeMs: input.finishTimeMs };
+  }
+  const effectiveTimeMs = input.finishTimeMs + input.crashes * SCORING_CONFIG.crashTimePenaltyMs;
+  const ratio =
+    input.parTimeMs !== undefined && input.parTimeMs > 0 && effectiveTimeMs > 0
+      ? input.parTimeMs / effectiveTimeMs
+      : 1;
+  const speedScore = Math.round(SCORING_CONFIG.baseFinish * Math.pow(ratio, SCORING_CONFIG.speedExp));
+  return { score: speedScore + trickBonus, speedScore, trickBonus, effectiveTimeMs };
+}
+
+/** Combo-building trick: grow ×1→×5 within the window, award base × combo to rawTrickPoints. */
 function awardTrick(state: ScoreState, basePoints: number, tick: number): void {
   if (state.lastTrickTick >= 0 && tick - state.lastTrickTick <= SCORING.comboWindowTicks) {
     state.combo = Math.min(SCORING.comboMax, state.combo + 1);
   } else {
     state.combo = 1;
   }
-  state.score += basePoints * state.combo;
+  state.rawTrickPoints += basePoints * state.combo;
   state.lastTrickTick = tick;
 }
 
-/** Reset transient streaks (on crash/respawn). Score, totals, and crashes persist. */
+/** Reset transient streaks (on crash/respawn). Earned points, totals, crashes persist. */
 export function resetScoreStreaks(state: ScoreState): void {
   state.airStreak = 0;
   state.flipAccum = 0;
@@ -116,75 +184,82 @@ export function resetScoreStreaks(state: ScoreState): void {
 
 export function updateScore(state: ScoreState, frame: ScoreFrame): void {
   if (frame.crashed) {
-    state.score = Math.max(SCORING.scoreFloor, state.score - SCORING.crashPenalty);
+    // Crashes no longer subtract points — they cost effective time at finish.
     state.crashes += 1;
     state.combo = 1;
     state.lastTrickTick = -1;
     resetScoreStreaks(state);
-    return;
-  }
-
-  const fullyAirborne = !frame.rearGrounded && !frame.frontGrounded;
-
-  if (fullyAirborne) {
-    state.airStreak += 1;
-    state.airTicks += 1;
-    if (state.airStreak % SCORING.airtimeTickWindow === 0) {
-      state.score += SCORING.airtimePoints; // flat: airtime never builds the combo
-    }
-
-    state.flipAccum += frame.angleDelta;
-    while (state.flipAccum >= TWO_PI) {
-      state.flipAccum -= TWO_PI;
-      state.flips += 1;
-      state.backflips += 1; // CCW while riding +x = backflip
-      awardTrick(state, SCORING.flipPoints, frame.tick);
-    }
-    while (state.flipAccum <= -TWO_PI) {
-      state.flipAccum += TWO_PI;
-      state.flips += 1;
-      state.frontflips += 1;
-      awardTrick(state, SCORING.flipPoints, frame.tick);
-    }
   } else {
-    // Touchdown of the first wheel after a real airborne stretch opens a
-    // clean-landing window; both wheels must settle within pairTicks, aligned.
-    if (state.airStreak >= SCORING.cleanLandingMinAirTicks) {
-      state.landingFirstDownTick = frame.tick;
-    }
-    state.airStreak = 0;
-    state.flipAccum = 0;
+    const fullyAirborne = !frame.rearGrounded && !frame.frontGrounded;
 
-    if (state.landingFirstDownTick >= 0) {
-      if (frame.rearGrounded && frame.frontGrounded) {
-        if (
-          frame.tick - state.landingFirstDownTick <= SCORING.cleanLandingPairTicks &&
-          frame.landingAligned
-        ) {
-          awardTrick(state, SCORING.cleanLandingPoints, frame.tick);
+    if (fullyAirborne) {
+      state.airStreak += 1;
+      state.airTicks += 1;
+      if (state.airStreak % SCORING.airtimeTickWindow === 0) {
+        state.rawTrickPoints += SCORING.airtimePoints; // flat: airtime never builds the combo
+      }
+
+      state.flipAccum += frame.angleDelta;
+      while (state.flipAccum >= TWO_PI) {
+        state.flipAccum -= TWO_PI;
+        state.flips += 1;
+        state.backflips += 1; // CCW while riding +x = backflip
+        awardTrick(state, SCORING.flipPoints, frame.tick);
+      }
+      while (state.flipAccum <= -TWO_PI) {
+        state.flipAccum += TWO_PI;
+        state.flips += 1;
+        state.frontflips += 1;
+        awardTrick(state, SCORING.flipPoints, frame.tick);
+      }
+    } else {
+      // Touchdown of the first wheel after a real airborne stretch opens a
+      // clean-landing window; both wheels must settle within pairTicks, aligned.
+      if (state.airStreak >= SCORING.cleanLandingMinAirTicks) {
+        state.landingFirstDownTick = frame.tick;
+      }
+      state.airStreak = 0;
+      state.flipAccum = 0;
+
+      if (state.landingFirstDownTick >= 0) {
+        if (frame.rearGrounded && frame.frontGrounded) {
+          if (
+            frame.tick - state.landingFirstDownTick <= SCORING.cleanLandingPairTicks &&
+            frame.landingAligned
+          ) {
+            awardTrick(state, SCORING.cleanLandingPoints, frame.tick);
+          }
+          state.landingFirstDownTick = -1;
+        } else if (frame.tick - state.landingFirstDownTick > SCORING.cleanLandingPairTicks) {
+          state.landingFirstDownTick = -1;
         }
-        state.landingFirstDownTick = -1;
-      } else if (frame.tick - state.landingFirstDownTick > SCORING.cleanLandingPairTicks) {
-        state.landingFirstDownTick = -1;
       }
     }
-  }
 
-  if (frame.rearGrounded && !frame.frontGrounded && frame.speed > SCORING.wheelieMinSpeed) {
-    state.wheelieStreak += 1;
-    if (state.wheelieStreak >= SCORING.wheelieTickWindow) {
+    if (frame.rearGrounded && !frame.frontGrounded && frame.speed > SCORING.wheelieMinSpeed) {
+      state.wheelieStreak += 1;
+      if (state.wheelieStreak >= SCORING.wheelieTickWindow) {
+        state.wheelieStreak = 0;
+        awardTrick(state, SCORING.wheeliePoints, frame.tick);
+      }
+    } else {
       state.wheelieStreak = 0;
-      awardTrick(state, SCORING.wheeliePoints, frame.tick);
     }
-  } else {
-    state.wheelieStreak = 0;
+
+    if (frame.finished) {
+      const r = computeFinalScore({
+        finished: true,
+        finishTimeMs: frame.timeMs,
+        parTimeMs: frame.parTimeMs,
+        crashes: state.crashes,
+        rawTrickPoints: state.rawTrickPoints,
+      });
+      state.speedScore = r.speedScore;
+      state.effectiveTimeMs = r.effectiveTimeMs;
+    }
   }
 
-  if (frame.finished) {
-    let bonus = SCORING.finishPoints;
-    if (frame.parTimeMs !== undefined) {
-      bonus += Math.max(0, (frame.parTimeMs - frame.timeMs) / 100);
-    }
-    state.score += bonus;
-  }
+  // Recompute the displayed score every tick: trick garnish always, speed once finished.
+  state.trickBonus = Math.round(state.rawTrickPoints * SCORING_CONFIG.trickWeight);
+  state.score = state.speedScore + state.trickBonus;
 }

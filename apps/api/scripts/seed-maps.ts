@@ -18,21 +18,18 @@ interface SeedMap {
   period: "90D" | "180D" | "1Y" | "ALL";
 }
 
+// Launch set: 4 coins at 1Y. Each map generates 3 tiers × 2 modes = 6 frozen
+// tracks server-side (→ 24 tracks total). DOGE is intentionally included as an
+// idiosyncratic, BTC-uncorrelated coin → genuinely different terrain shape.
 const SEED_MAPS: SeedMap[] = [
   { slug: "btc-1y", symbol: "BTC", name: "Bitcoin 1Y", source: "coingecko", source_id: "bitcoin", period: "1Y" },
-  { slug: "btc-all", symbol: "BTC", name: "Bitcoin All-Time", source: "coingecko", source_id: "bitcoin", period: "ALL" },
   { slug: "eth-1y", symbol: "ETH", name: "Ethereum 1Y", source: "coingecko", source_id: "ethereum", period: "1Y" },
-  { slug: "eth-all", symbol: "ETH", name: "Ethereum All-Time", source: "coingecko", source_id: "ethereum", period: "ALL" },
   { slug: "sol-1y", symbol: "SOL", name: "Solana 1Y", source: "coingecko", source_id: "solana", period: "1Y" },
-  { slug: "sol-all", symbol: "SOL", name: "Solana All-Time", source: "coingecko", source_id: "solana", period: "ALL" },
+  { slug: "doge-1y", symbol: "DOGE", name: "Dogecoin 1Y", source: "coingecko", source_id: "dogecoin", period: "1Y" },
   // ── Memecoin maps (GeckoTerminal pools) ─────────────────────────────────
   // TODO(owner): paste the pool address and uncomment. source_id format is
-  // "{network}:{poolAddress}" — find the pool on geckoterminal.com.
-  // NOTE: the live cr_maps period check only allows 1Y/ALL today; run the
-  // period-widening statement in sql/001_track_pipeline.sql before seeding
-  // 90D maps.
+  // "{network}:{poolAddress}". Requires widening the cr_maps period check to 90D.
   // { slug: "meme1-90d", symbol: "MEME1", name: "Memecoin One 90D", source: "geckoterminal", source_id: "solana:<POOL_ADDRESS>", period: "90D" },
-  // { slug: "meme2-90d", symbol: "MEME2", name: "Memecoin Two 90D", source: "geckoterminal", source_id: "solana:<POOL_ADDRESS>", period: "90D" },
 ];
 
 /** CoinGecko free tier is ~5-15 req/min; each map costs one upstream call. */
@@ -67,21 +64,22 @@ async function main(): Promise<void> {
         console.log(`  ${map.slug}: already seeded, skipping`);
         continue;
       }
+      type TierStats = { raw?: { stats?: { maxSlopeDeg?: number }; parTimeMs?: number } };
       const body = (await res.json()) as {
         error?: string;
         candleCount?: number;
-        map?: { difficulty?: string };
-        tracks?: { raw?: { stats?: { worldLength?: number; maxSlopeDeg?: number } } };
+        trackCount?: number;
+        tiers?: Record<string, TierStats>;
       };
       if (!res.ok) {
         failures++;
         console.error(`  ${map.slug}: HTTP ${res.status} — ${body.error ?? "unknown error"}`);
         continue;
       }
-      const s = body.tracks?.raw?.stats;
+      const slope = (t: string) => body.tiers?.[t]?.raw?.stats?.maxSlopeDeg;
       console.log(
-        `  ${map.slug}: ok — ${body.candleCount} candles, ${s?.worldLength}m, ` +
-          `maxSlope ${s?.maxSlopeDeg}°, difficulty ${body.map?.difficulty}`,
+        `  ${map.slug}: ok — ${body.candleCount} candles, ${body.trackCount} tracks; ` +
+          `maxSlope CHILL ${slope("CHILL")}° / VOLATILE ${slope("VOLATILE")}° / DEGEN ${slope("DEGEN")}°`,
       );
     } catch (err) {
       failures++;

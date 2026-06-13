@@ -3,14 +3,30 @@ import {
   MAX_BAND_M,
   MAX_CANDLES,
   SPACING_M,
+  amplify,
   difficultyFor,
   downsample,
+  generateTier,
   normalize,
   rawTrack,
+  roughness,
   smoothTrack,
   stats,
   type TrackPoint,
 } from "../src/trackgen.js";
+
+/** Count segments at or above `thr` degrees — the "sustained challenge" metric. */
+function steepCount(points: TrackPoint[], thr = 45): number {
+  let c = 0;
+  for (let i = 1; i < points.length; i++) {
+    const deg =
+      (Math.atan(Math.abs(points[i][1] - points[i - 1][1]) / (points[i][0] - points[i - 1][0])) *
+        180) /
+      Math.PI;
+    if (deg >= thr) c++;
+  }
+  return c;
+}
 
 // ~24 closes with a violent spike so the 55-degree clamp engages.
 const SPIKY_CLOSES = [
@@ -74,6 +90,53 @@ describe("golden determinism (byte-identical generation)", () => {
     const a = JSON.stringify(smoothTrack(normalize(SPIKY_CLOSES)));
     const b = JSON.stringify(smoothTrack(normalize(SPIKY_CLOSES)));
     expect(b).toBe(a);
+  });
+});
+
+// ── Difficulty tiers ────────────────────────────────────────────────────────
+const SPIKY_VOLATILE =
+  "[[0,-1.8952],[6,-1.4321],[12,-2.2918],[18,-1.265],[24,-1.0846],[30,-1.0282],[36,-0.53],[42,0.3646],[48,-0.3567],[54,0.9954],[60,9.5634],[66,0.9954],[72,1.0503],[78,1.8429],[84,1.3093],[90,2.4098],[96,3.1233],[102,2.8139],[108,4.1877],[114,3.7193],[120,4.7483],[126,5.3163],[132,5.36],[138,6.1592]]";
+
+const SPIKY_DEGEN =
+  "[[0,-4.3548],[6,-3.5004],[12,-5.1132],[18,-3.69],[24,-1.8529],[30,-3.6437],[36,-1.9799],[42,-1.4203],[48,-1.307],[54,-0.0724],[60,8.4956],[66,-0.0724],[72,-1.2693],[78,-0.1352],[84,0.1969],[90,1.405],[96,2.8484],[102,2.0863],[108,4.3771],[114,3.719],[120,5.8002],[126,5.8045],[132,5.0803],[138,7.2751]]";
+
+describe("difficulty tiers", () => {
+  it("CHILL is byte-identical to normalize (tame baseline)", () => {
+    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "CHILL"))).toBe(SPIKY_NORMALIZED);
+    expect(JSON.stringify(generateTier(CALM_CLOSES, "CHILL"))).toBe(CALM_NORMALIZED);
+  });
+
+  it("VOLATILE and DEGEN match their golden strings (seeded roughness is deterministic)", () => {
+    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "VOLATILE"))).toBe(SPIKY_VOLATILE);
+    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"))).toBe(SPIKY_DEGEN);
+  });
+
+  it("roughness is reproducible across runs", () => {
+    const a = JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"));
+    const b = JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"));
+    expect(b).toBe(a);
+  });
+
+  it("harder tiers hit ~55° far more often (sustained challenge escalates)", () => {
+    const chill = generateTier(CALM_CLOSES, "CHILL");
+    const volatile = generateTier(CALM_CLOSES, "VOLATILE");
+    const degen = generateTier(CALM_CLOSES, "DEGEN");
+    expect(steepCount(chill)).toBeLessThan(steepCount(volatile));
+    expect(steepCount(volatile)).toBeLessThan(steepCount(degen));
+    expect(stats(degen).maxSlopeDeg).toBeGreaterThanOrEqual(stats(chill).maxSlopeDeg);
+  });
+
+  it("never exceeds the 55° clamp on any tier", () => {
+    for (const tier of ["CHILL", "VOLATILE", "DEGEN"] as const) {
+      expect(stats(generateTier(SPIKY_CLOSES, tier)).maxSlopeDeg).toBeLessThanOrEqual(55);
+      expect(stats(generateTier(CALM_CLOSES, tier)).maxSlopeDeg).toBeLessThanOrEqual(55);
+    }
+  });
+
+  it("amplify(_,1) and roughness(_,0) are exact identities", () => {
+    const pts = normalize(SPIKY_CLOSES);
+    expect(JSON.stringify(amplify(pts, 1))).toBe(JSON.stringify(pts));
+    expect(JSON.stringify(roughness(pts, 0))).toBe(JSON.stringify(pts));
   });
 });
 

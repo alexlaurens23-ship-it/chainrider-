@@ -1,12 +1,15 @@
+import { SCORING_CONFIG } from "@chainrider/physics";
 import type { FastifyPluginAsync } from "fastify";
 import { ChartFetchError, fetchCloses, type ChartSource, type Period } from "../chartdata.js";
 import { getDb } from "../db.js";
 import {
+  TIERS,
   downsample,
-  normalize,
+  generateTier,
   rawTrack,
   smoothTrack,
   stats,
+  type Tier,
   type TrackPoint,
   type TrackStats,
 } from "../trackgen.js";
@@ -22,50 +25,74 @@ interface CreateMapBody {
   period: Period;
 }
 
-interface GeneratedMode {
+interface GeneratedTrack {
+  tier: Tier;
+  mode: "raw" | "smooth";
   points: TrackPoint[];
   stats: TrackStats;
+  parTimeMs: number;
 }
 
 interface Generated {
-  raw: GeneratedMode;
-  smooth: GeneratedMode;
+  tracks: GeneratedTrack[];
   candleCount: number;
 }
 
-/** Fetches fresh closes and generates both modes. Throws ChartFetchError / Error. */
-async function generateTracks(
+/**
+ * Fetches fresh closes and generates all 3 tiers × 2 modes (6 frozen tracks).
+ * Each tier has a more amplified/rougher terrain and a slower assumed fair
+ * pace → par. Throws ChartFetchError (fetch) / Error (bad data → 422).
+ */
+async function generateAllTiers(
   source: ChartSource,
   sourceId: string,
   period: Period,
 ): Promise<Generated> {
   const candles = await fetchCloses(source, sourceId, period);
   let closes = candles.map((c) => c.close);
-  // ALL-period history is stride-capped so tracks stay a playable length;
-  // shorter periods ride every daily candle.
   if (period === "ALL") closes = downsample(closes);
-  const points = normalize(closes); // throws on <10 or invalid closes -> 422
-  const raw = rawTrack(points);
-  const smooth = smoothTrack(points);
+
+  const tracks: GeneratedTrack[] = [];
+  for (const tier of TIERS) {
+    const tierRaw = generateTier(closes, tier); // throws on <10 / invalid closes -> 422
+    const pace = SCORING_CONFIG.parPaceMps[tier];
+    for (const mode of ["raw", "smooth"] as const) {
+      const points = mode === "raw" ? rawTrack(tierRaw) : smoothTrack(tierRaw);
+      const s = stats(points);
+      tracks.push({ tier, mode, points, stats: s, parTimeMs: Math.round((s.worldLength / pace) * 1000) });
+    }
+  }
+  return { tracks, candleCount: candles.length };
+}
+
+/** cr_tracks row (flat stats columns + tier + par on the live schema). */
+function trackInsertRow(mapId: number, version: number, gt: GeneratedTrack) {
   return {
-    raw: { points: raw, stats: stats(raw) },
-    smooth: { points: smooth, stats: stats(smooth) },
-    candleCount: candles.length,
+    map_id: mapId,
+    tier: gt.tier,
+    mode: gt.mode,
+    version,
+    points: gt.points,
+    point_count: gt.stats.pointCount,
+    world_length: gt.stats.worldLength,
+    max_slope_deg: gt.stats.maxSlopeDeg,
+    volatility: gt.stats.volatility,
+    par_time_ms: gt.parTimeMs,
   };
 }
 
-/** cr_tracks stores stats as flat columns (live Supabase schema). */
-function trackInsertRow(mapId: number, mode: "raw" | "smooth", version: number, gen: GeneratedMode) {
-  return {
-    map_id: mapId,
-    mode,
-    version,
-    points: gen.points,
-    point_count: gen.stats.pointCount,
-    world_length: gen.stats.worldLength,
-    max_slope_deg: gen.stats.maxSlopeDeg,
-    volatility: gen.stats.volatility,
-  };
+/** Summarize generated tiers for the API response (no heavy points). */
+function summarize(tracks: GeneratedTrack[]) {
+  const out: Record<string, unknown> = {};
+  for (const tier of TIERS) {
+    const raw = tracks.find((t) => t.tier === tier && t.mode === "raw");
+    const smooth = tracks.find((t) => t.tier === tier && t.mode === "smooth");
+    out[tier] = {
+      raw: raw ? { stats: raw.stats, parTimeMs: raw.parTimeMs } : null,
+      smooth: smooth ? { stats: smooth.stats, parTimeMs: smooth.parTimeMs } : null,
+    };
+  }
+  return out;
 }
 
 /** Owner admin panel (X-Admin-Key gated): map creation + track regeneration. */
@@ -102,7 +129,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
       let generated: Generated;
       try {
-        generated = await generateTracks(body.source, body.source_id, body.period);
+        generated = await generateAllTiers(body.source, body.source_id, body.period);
       } catch (err) {
         if (err instanceof ChartFetchError) {
           return reply.code(502).send({ error: err.message, status: err.status ?? null });
@@ -120,7 +147,6 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
           source: body.source,
           source_id: body.source_id,
           period: body.period,
-          difficulty: generated.raw.stats.difficulty, // difficulty comes from the raw track
         })
         .select()
         .single();
@@ -135,11 +161,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
       const tracksRes = await db
         .from("cr_tracks")
-        .insert([
-          trackInsertRow(map.id, "raw", 1, generated.raw),
-          trackInsertRow(map.id, "smooth", 1, generated.smooth),
-        ])
-        .select("id,mode,version");
+        .insert(generated.tracks.map((gt) => trackInsertRow(map.id, 1, gt)))
+        .select("id,tier,mode,version");
       if (tracksRes.error) {
         // supabase-js has no transactions: compensating delete keeps cr_maps
         // consistent (the new map has no other references yet).
@@ -148,14 +171,11 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(500).send({ error: "database error" });
       }
 
-      const byMode = (mode: "raw" | "smooth") => {
-        const t = tracksRes.data.find((row) => row.mode === mode);
-        return t ? { id: t.id, version: t.version, stats: generated[mode].stats } : null;
-      };
       return reply.code(201).send({
         map,
         candleCount: generated.candleCount,
-        tracks: { raw: byMode("raw"), smooth: byMode("smooth") },
+        trackCount: tracksRes.data.length,
+        tiers: summarize(generated.tracks),
       });
     },
   );
@@ -183,7 +203,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
       let generated: Generated;
       try {
-        generated = await generateTracks(
+        generated = await generateAllTiers(
           map.source as ChartSource,
           map.source_id as string,
           map.period as Period,
@@ -221,35 +241,19 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
       const insertRes = await db
         .from("cr_tracks")
-        .insert([
-          trackInsertRow(map.id, "raw", nextVersion, generated.raw),
-          trackInsertRow(map.id, "smooth", nextVersion, generated.smooth),
-        ])
-        .select("id,mode,version");
+        .insert(generated.tracks.map((gt) => trackInsertRow(map.id, nextVersion, gt)))
+        .select("id,tier,mode,version");
       if (insertRes.error) {
         app.log.error(insertRes.error, "cr_tracks insert failed");
         return reply.code(500).send({ error: "database error" });
       }
 
-      const updateMapRes = await db
-        .from("cr_maps")
-        .update({ difficulty: generated.raw.stats.difficulty })
-        .eq("id", map.id);
-      if (updateMapRes.error) {
-        app.log.error(updateMapRes.error, "cr_maps difficulty update failed");
-        return reply.code(500).send({ error: "database error" });
-      }
-
-      const byMode = (mode: "raw" | "smooth") => {
-        const t = insertRes.data.find((row) => row.mode === mode);
-        return t ? { id: t.id, version: t.version, stats: generated[mode].stats } : null;
-      };
       return {
         mapId: map.id,
         version: nextVersion,
-        difficulty: generated.raw.stats.difficulty,
         candleCount: generated.candleCount,
-        tracks: { raw: byMode("raw"), smooth: byMode("smooth") },
+        trackCount: insertRes.data.length,
+        tiers: summarize(generated.tracks),
       };
     },
   );

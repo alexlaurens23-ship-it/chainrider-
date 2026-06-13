@@ -31,6 +31,17 @@ export type TrackPoint = [number, number];
 
 export type Difficulty = "easy" | "medium" | "hard" | "insane";
 
+/** Difficulty tiers — each generates a separate, more dramatic terrain. */
+export type Tier = "CHILL" | "VOLATILE" | "DEGEN";
+export const TIERS: readonly Tier[] = ["CHILL", "VOLATILE", "DEGEN"];
+
+/** Per-tier terrain knobs. amplify scales vertical deviation; roughness adds bumps (m). */
+export const TIER_CONFIG: Record<Tier, { amplify: number; roughness: number }> = {
+  CHILL: { amplify: 1.0, roughness: 0.0 },
+  VOLATILE: { amplify: 1.8, roughness: 0.4 },
+  DEGEN: { amplify: 2.8, roughness: 0.9 },
+};
+
 export interface TrackStats {
   /** x-span of the polyline in metres (the sim adds its own lead-in/run-out). */
   worldLength: number;
@@ -114,6 +125,103 @@ export function normalize(closes: readonly number[]): TrackPoint[] {
   }
 
   return ys.map((y, i) => [i * SPACING_M, round4(y)]);
+}
+
+/**
+ * Scales each point's vertical deviation from the track's mean line by `factor`,
+ * making price moves dramatically taller. factor === 1 is an exact identity
+ * (so CHILL stays byte-identical to normalize). x is untouched.
+ */
+export function amplify(points: readonly TrackPoint[], factor: number): TrackPoint[] {
+  if (factor === 1) return points.map(([x, y]) => [x, y]);
+  let sum = 0;
+  for (const [, y] of points) sum += y;
+  const meanY = sum / points.length;
+  return points.map(([x, y]) => [x, round4(meanY + (y - meanY) * factor)]);
+}
+
+/** Deterministic 32-bit FNV-1a hash of the (rounded) point coordinates. */
+function hashPoints(points: readonly TrackPoint[]): number {
+  let h = 0x811c9dc5;
+  for (const [x, y] of points) {
+    for (const v of [Math.round(x * 1e4), Math.round(y * 1e4)]) {
+      // Mix the integer's bytes (handles negatives via >>> 0).
+      let u = v >>> 0;
+      for (let b = 0; b < 4; b++) {
+        h ^= u & 0xff;
+        h = Math.imul(h, 0x01000193);
+        u >>>= 8;
+      }
+    }
+  }
+  return h >>> 0;
+}
+
+/** Seeded PRNG (mulberry32) → deterministic floats in [0, 1). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Adds a deterministic high-frequency noise layer (±intensity m) on top of the
+ * macro chart shape — small kickers that create airtime even on flat stretches.
+ * Seeded by a hash of the input points (NOT Math.random) so it is reproducible
+ * and golden-stable. intensity === 0 is an exact identity. Endpoints are left
+ * fixed so the sim's lead-in/run-out attach cleanly.
+ */
+export function roughness(points: readonly TrackPoint[], intensity: number): TrackPoint[] {
+  if (intensity === 0) return points.map(([x, y]) => [x, y]);
+  const prng = mulberry32(hashPoints(points));
+  const n = points.length;
+  return points.map(([x, y], i) => {
+    if (i === 0 || i === n - 1) return [x, y];
+    return [x, round4(y + (prng() * 2 - 1) * intensity)];
+  });
+}
+
+/**
+ * Per-segment slope clamp: caps each segment's |dy| at the 55° limit, walking
+ * left→right and rebuilding y cumulatively. Unlike normalize's global rescale
+ * (which lets one spike squash the whole track), this makes amplified tracks
+ * hit ~55° OFTEN — sustained challenge. If nothing exceeds the limit it is an
+ * exact identity (so an already-tame CHILL track is untouched).
+ */
+export function clampSlopeSegments(points: readonly TrackPoint[]): TrackPoint[] {
+  let maxAbsDy = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dy = Math.abs(points[i][1] - points[i - 1][1]);
+    if (dy > maxAbsDy) maxAbsDy = dy;
+  }
+  if (maxAbsDy <= SEGMENT_DY_LIMIT) return points.map(([x, y]) => [x, y]);
+
+  const limit = SEGMENT_DY_LIMIT * SLOPE_SAFETY;
+  const out: TrackPoint[] = [[points[0][0], round4(points[0][1])]];
+  for (let i = 1; i < points.length; i++) {
+    const dy = points[i][1] - points[i - 1][1];
+    const capped = dy > limit ? limit : dy < -limit ? -limit : dy;
+    out.push([points[i][0], round4(out[i - 1][1] + capped)]);
+  }
+  return out;
+}
+
+/**
+ * Full tier pipeline: normalize → amplify → roughness → per-segment clamp.
+ * CHILL (amplify 1, roughness 0) is byte-identical to normalize(closes); the
+ * harder tiers get taller, bumpier, and steeper-more-often terrain.
+ */
+export function generateTier(closes: readonly number[], tier: Tier): TrackPoint[] {
+  const cfg = TIER_CONFIG[tier];
+  const base = normalize(closes);
+  const amplified = amplify(base, cfg.amplify);
+  const rough = roughness(amplified, cfg.roughness);
+  return clampSlopeSegments(rough);
 }
 
 /** The polyline as-is (validated fresh copy) — "raw" mode. */

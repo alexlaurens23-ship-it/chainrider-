@@ -194,6 +194,12 @@ export interface SimSnapshot {
   head: { x: number; y: number };
 
   score: number;
+  /** Speed component (set at finish; 0 during the run / DNF). */
+  speedScore: number;
+  /** Weighted trick component. */
+  trickBonus: number;
+  /** Finish time + crash penalties, ms (set at finish). */
+  effectiveTimeMs: number;
   combo: number;
   flips: number;
   backflips: number;
@@ -217,6 +223,12 @@ export interface SimSnapshot {
 /** Result of a headless replay — what the server persists and ranks. */
 export interface FinalResult {
   score: number;
+  /** Speed component (0 on DNF). */
+  speedScore: number;
+  /** Weighted trick component. */
+  trickBonus: number;
+  /** Finish time + crash penalties, ms. */
+  effectiveTimeMs: number;
   /** Finish time if finished, else total simulated time. Ms of sim time. */
   timeMs: number;
   ticks: number;

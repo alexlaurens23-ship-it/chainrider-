@@ -1,5 +1,5 @@
 // Temporary helper: prints golden strings for test/trackgen.test.ts.
-import { normalize, rawTrack, smoothTrack, stats } from "../src/trackgen.js";
+import { generateTier, normalize, rawTrack, smoothTrack, stats } from "../src/trackgen.js";
 
 // ~24 closes with a violent spike so the 55-degree clamp engages.
 const SPIKY_CLOSES = [
@@ -25,3 +25,11 @@ for (const [label, closes] of [
   console.log(`${label}_SMOOTH_STATS = ${JSON.stringify(stats(smooth))}`);
   console.log("");
 }
+
+// Tier outputs (SPIKY fixture) — CHILL must equal SPIKY_NORMALIZED above.
+for (const tier of ["CHILL", "VOLATILE", "DEGEN"] as const) {
+  const pts = generateTier(SPIKY_CLOSES, tier);
+  console.log(`SPIKY_${tier} = ${JSON.stringify(pts)}`);
+  console.log(`SPIKY_${tier}_STATS = ${JSON.stringify(stats(pts))}`);
+}
+console.log(`CHILL===NORMALIZED: ${JSON.stringify(generateTier(SPIKY_CLOSES, "CHILL")) === JSON.stringify(normalize(SPIKY_CLOSES))}`);
