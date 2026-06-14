@@ -4,8 +4,8 @@
  */
 
 export type ChartSource = "coingecko" | "geckoterminal";
-/** Uppercase to match the live cr_maps period check constraint. */
-export type Period = "90D" | "180D" | "1Y" | "ALL";
+/** Lookback windows (match the cr_maps period check). Shorter = more recent action. */
+export type Period = "1Y" | "6M" | "3M";
 
 /** One daily candle close; t is the sample timestamp in ms UTC. */
 export interface Candle {
@@ -28,17 +28,15 @@ const ATTEMPT_TIMEOUT_MS = 15_000;
 const MS_PER_DAY = 86_400_000;
 
 const PERIOD_TO_COINGECKO_DAYS: Record<Period, string> = {
-  "90D": "90",
-  "180D": "180",
   "1Y": "365",
-  ALL: "max",
+  "6M": "180",
+  "3M": "90",
 };
 
 const PERIOD_TO_CANDLE_LIMIT: Record<Period, number> = {
-  "90D": 90,
-  "180D": 180,
   "1Y": 365,
-  ALL: 1000, // GeckoTerminal API max
+  "6M": 180,
+  "3M": 90,
 };
 
 function sleep(ms: number): Promise<void> {

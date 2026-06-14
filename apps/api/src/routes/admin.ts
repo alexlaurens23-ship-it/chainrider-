@@ -3,8 +3,8 @@ import type { FastifyPluginAsync } from "fastify";
 import { ChartFetchError, fetchCloses, type ChartSource, type Period } from "../chartdata.js";
 import { getDb } from "../db.js";
 import {
+  PERIOD_AMPLITUDE,
   TIERS,
-  downsample,
   generateTier,
   rawTrack,
   smoothTrack,
@@ -49,12 +49,13 @@ async function generateAllTiers(
   period: Period,
 ): Promise<Generated> {
   const candles = await fetchCloses(source, sourceId, period);
-  let closes = candles.map((c) => c.close);
-  if (period === "ALL") closes = downsample(closes);
+  const closes = candles.map((c) => c.close);
+  // Shorter periods get an extra amplitude bump → more dramatic terrain.
+  const periodAmp = PERIOD_AMPLITUDE[period] ?? 1;
 
   const tracks: GeneratedTrack[] = [];
   for (const tier of TIERS) {
-    const tierRaw = generateTier(closes, tier); // throws on <10 / invalid closes -> 422
+    const tierRaw = generateTier(closes, tier, periodAmp); // throws on <10 / invalid closes -> 422
     const pace = SCORING_CONFIG.parPaceMps[tier];
     for (const mode of ["raw", "smooth"] as const) {
       const points = mode === "raw" ? rawTrack(tierRaw) : smoothTrack(tierRaw);
@@ -119,7 +120,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
             name: { type: "string", minLength: 1, maxLength: 80 },
             source: { enum: ["coingecko", "geckoterminal"] },
             source_id: { type: "string", minLength: 1, maxLength: 128 },
-            period: { enum: ["90D", "180D", "1Y", "ALL"] },
+            period: { enum: ["1Y", "6M", "3M"] },
           },
         },
       },

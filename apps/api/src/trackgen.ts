@@ -31,16 +31,22 @@ export type TrackPoint = [number, number];
 
 export type Difficulty = "easy" | "medium" | "hard" | "insane";
 
-/** Difficulty tiers — each generates a separate, more dramatic terrain. */
-export type Tier = "CHILL" | "VOLATILE" | "DEGEN";
-export const TIERS: readonly Tier[] = ["CHILL", "VOLATILE", "DEGEN"];
+/** Difficulty tiers — each generates a separate, more dramatic terrain (easiest → hardest). */
+export type Tier = "VOLATILE" | "DEGEN" | "SAVAGE";
+export const TIERS: readonly Tier[] = ["VOLATILE", "DEGEN", "SAVAGE"];
 
 /** Per-tier terrain knobs. amplify scales vertical deviation; roughness adds bumps (m). */
 export const TIER_CONFIG: Record<Tier, { amplify: number; roughness: number }> = {
-  CHILL: { amplify: 1.0, roughness: 0.0 },
   VOLATILE: { amplify: 1.8, roughness: 0.4 },
   DEGEN: { amplify: 2.8, roughness: 0.9 },
+  SAVAGE: { amplify: 3.6, roughness: 1.2 },
 };
+
+/**
+ * Shorter periods zoom into recent action and get an extra amplitude bump on
+ * top of the tier amplify, so 3M is the wildest, not the flattest.
+ */
+export const PERIOD_AMPLITUDE: Record<string, number> = { "1Y": 1.0, "6M": 1.25, "3M": 1.5 };
 
 export interface TrackStats {
   /** x-span of the polyline in metres (the sim adds its own lead-in/run-out). */
@@ -213,13 +219,18 @@ export function clampSlopeSegments(points: readonly TrackPoint[]): TrackPoint[] 
 
 /**
  * Full tier pipeline: normalize → amplify → roughness → per-segment clamp.
- * CHILL (amplify 1, roughness 0) is byte-identical to normalize(closes); the
- * harder tiers get taller, bumpier, and steeper-more-often terrain.
+ * `periodAmp` (1Y 1.0 / 6M 1.25 / 3M 1.5) multiplies the tier amplify so shorter
+ * periods are more dramatic. With periodAmp = 1 the output is unchanged from the
+ * pre-period generation, keeping the VOLATILE/DEGEN golden strings byte-identical.
  */
-export function generateTier(closes: readonly number[], tier: Tier): TrackPoint[] {
+export function generateTier(
+  closes: readonly number[],
+  tier: Tier,
+  periodAmp = 1,
+): TrackPoint[] {
   const cfg = TIER_CONFIG[tier];
   const base = normalize(closes);
-  const amplified = amplify(base, cfg.amplify);
+  const amplified = amplify(base, cfg.amplify * periodAmp);
   const rough = roughness(amplified, cfg.roughness);
   return clampSlopeSegments(rough);
 }

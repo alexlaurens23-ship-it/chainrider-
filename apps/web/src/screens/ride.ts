@@ -6,7 +6,7 @@ import { createRideInput } from "../ride/input";
 import { createRideLoop, type RideEnd, type RideLoop } from "../ride/loop";
 import { createRideRenderer, type RideRenderer } from "../ride/render";
 import { createRideHud, type RideHud } from "../ride/hud";
-import { showRunComplete, showToast } from "../ride/runComplete";
+import { showRunComplete } from "../ride/runComplete";
 
 const DEFAULT_MAX_SCORE = 50000;
 
@@ -143,7 +143,9 @@ export function createRideScreen(): Screen {
           maxScore,
         },
         {
-          onSubmit: () => {
+          // Auto-submits the moment the run ends (finish OR quit); the card
+          // shows the saving/saved status. Returns the promise for that status.
+          autoSubmit: () =>
             submitRun({
               trackId: trk.id,
               mode: trk.mode,
@@ -155,10 +157,7 @@ export function createRideScreen(): Screen {
               maxCombo: end.maxCombo,
               simVersion: SIM_VERSION,
               inputLog: end.log,
-            })
-              .then(() => showToast(host, "Score submitted — pending validation"))
-              .catch(() => showToast(host, "Submit failed — try again"));
-          },
+            }),
           onRetry: () => begin(),
           onNewTrack: () => {
             location.hash = "#/";

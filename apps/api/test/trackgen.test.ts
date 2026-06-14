@@ -100,36 +100,55 @@ const SPIKY_VOLATILE =
 const SPIKY_DEGEN =
   "[[0,-4.3548],[6,-3.5004],[12,-5.1132],[18,-3.69],[24,-1.8529],[30,-3.6437],[36,-1.9799],[42,-1.4203],[48,-1.307],[54,-0.0724],[60,8.4956],[66,-0.0724],[72,-1.2693],[78,-0.1352],[84,0.1969],[90,1.405],[96,2.8484],[102,2.0863],[108,4.3771],[114,3.719],[120,5.8002],[126,5.8045],[132,5.0803],[138,7.2751]]";
 
-describe("difficulty tiers", () => {
-  it("CHILL is byte-identical to normalize (tame baseline)", () => {
-    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "CHILL"))).toBe(SPIKY_NORMALIZED);
-    expect(JSON.stringify(generateTier(CALM_CLOSES, "CHILL"))).toBe(CALM_NORMALIZED);
-  });
+const SPIKY_SAVAGE =
+  "[[0,-6.3226],[6,-5.8522],[12,-6.4693],[18,-4.4015],[24,-4.5013],[30,-5.6737],[36,-3.4727],[42,-2.7008],[48,-2.6567],[54,-0.8516],[60,7.7164],[66,-0.8516],[72,-2.2506],[78,-0.6112],[84,-1.4964],[90,0.4644],[96,3.9311],[102,1.8482],[108,3.7014],[114,2.7642],[120,6.8835],[126,7.188],[132,5.7433],[138,8.7465]]";
 
-  it("VOLATILE and DEGEN match their golden strings (seeded roughness is deterministic)", () => {
+describe("difficulty tiers", () => {
+  it("VOLATILE/DEGEN/SAVAGE match their golden strings (seeded roughness is deterministic)", () => {
     expect(JSON.stringify(generateTier(SPIKY_CLOSES, "VOLATILE"))).toBe(SPIKY_VOLATILE);
     expect(JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"))).toBe(SPIKY_DEGEN);
+    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "SAVAGE"))).toBe(SPIKY_SAVAGE);
   });
 
   it("roughness is reproducible across runs", () => {
-    const a = JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"));
-    const b = JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN"));
+    const a = JSON.stringify(generateTier(SPIKY_CLOSES, "SAVAGE"));
+    const b = JSON.stringify(generateTier(SPIKY_CLOSES, "SAVAGE"));
     expect(b).toBe(a);
   });
 
+  // A longer varied series with headroom (a short series saturates to ~all-steep
+  // at DEGEN, leaving nothing for SAVAGE to exceed). Deterministic test fixture.
+  const VARIED_CLOSES = Array.from(
+    { length: 50 },
+    (_, i) => 100 + 22 * Math.sin(i * 0.7) + 9 * Math.sin(i * 1.9) + 4 * Math.cos(i * 0.4),
+  );
+
   it("harder tiers hit ~55° far more often (sustained challenge escalates)", () => {
-    const chill = generateTier(CALM_CLOSES, "CHILL");
-    const volatile = generateTier(CALM_CLOSES, "VOLATILE");
-    const degen = generateTier(CALM_CLOSES, "DEGEN");
-    expect(steepCount(chill)).toBeLessThan(steepCount(volatile));
+    const volatile = generateTier(VARIED_CLOSES, "VOLATILE");
+    const degen = generateTier(VARIED_CLOSES, "DEGEN");
+    const savage = generateTier(VARIED_CLOSES, "SAVAGE");
     expect(steepCount(volatile)).toBeLessThan(steepCount(degen));
-    expect(stats(degen).maxSlopeDeg).toBeGreaterThanOrEqual(stats(chill).maxSlopeDeg);
+    expect(steepCount(degen)).toBeLessThan(steepCount(savage));
   });
 
-  it("never exceeds the 55° clamp on any tier", () => {
-    for (const tier of ["CHILL", "VOLATILE", "DEGEN"] as const) {
-      expect(stats(generateTier(SPIKY_CLOSES, tier)).maxSlopeDeg).toBeLessThanOrEqual(55);
-      expect(stats(generateTier(CALM_CLOSES, tier)).maxSlopeDeg).toBeLessThanOrEqual(55);
+  it("shorter-period amplitude makes the same tier steeper more often", () => {
+    const oneYear = generateTier(VARIED_CLOSES, "VOLATILE", 1.0);
+    const sixMonth = generateTier(VARIED_CLOSES, "VOLATILE", 1.25);
+    const threeMonth = generateTier(VARIED_CLOSES, "VOLATILE", 1.5);
+    expect(steepCount(sixMonth)).toBeGreaterThan(steepCount(oneYear));
+    expect(steepCount(threeMonth)).toBeGreaterThan(steepCount(sixMonth));
+  });
+
+  it("periodAmp = 1 leaves the tier output unchanged (golden-stable)", () => {
+    expect(JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN", 1))).toBe(SPIKY_DEGEN);
+  });
+
+  it("never exceeds the 55° clamp on any tier or period amplitude", () => {
+    for (const tier of ["VOLATILE", "DEGEN", "SAVAGE"] as const) {
+      for (const amp of [1.0, 1.25, 1.5]) {
+        expect(stats(generateTier(SPIKY_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(55);
+        expect(stats(generateTier(CALM_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(55);
+      }
     }
   });
 

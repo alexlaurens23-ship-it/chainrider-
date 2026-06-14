@@ -26,10 +26,9 @@ for (const [label, closes] of [
   console.log("");
 }
 
-// Tier outputs (SPIKY fixture) — CHILL must equal SPIKY_NORMALIZED above.
-for (const tier of ["CHILL", "VOLATILE", "DEGEN"] as const) {
+// Tier outputs (SPIKY fixture, periodAmp = 1).
+for (const tier of ["VOLATILE", "DEGEN", "SAVAGE"] as const) {
   const pts = generateTier(SPIKY_CLOSES, tier);
   console.log(`SPIKY_${tier} = ${JSON.stringify(pts)}`);
   console.log(`SPIKY_${tier}_STATS = ${JSON.stringify(stats(pts))}`);
 }
-console.log(`CHILL===NORMALIZED: ${JSON.stringify(generateTier(SPIKY_CLOSES, "CHILL")) === JSON.stringify(normalize(SPIKY_CLOSES))}`);

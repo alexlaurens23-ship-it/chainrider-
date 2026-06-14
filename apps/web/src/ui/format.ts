@@ -11,11 +11,11 @@ export function difficultyColor(d: Difficulty): string {
   return DIFFICULTY_COLORS[d] ?? "#9fb4c8";
 }
 
-/** Tier identity colors — mint / amber / red, matching the difficulty palette. */
+/** Tier identity colors — a heat ramp: amber → red → magenta (SAVAGE hottest). */
 const TIER_COLORS: Record<Tier, string> = {
-  CHILL: "#3ef0a0",
   VOLATILE: "#ffc24b",
   DEGEN: "#ff3c5a",
+  SAVAGE: "#e23bff",
 };
 
 export function tierColor(tier: Tier): string {

@@ -22,7 +22,8 @@ export interface RunSummary {
 }
 
 export interface RunCompleteHandlers {
-  onSubmit(): void;
+  /** Fired automatically when the card mounts (finish OR quit). */
+  autoSubmit(): Promise<unknown>;
   onRetry(): void;
   onNewTrack(): void;
 }
@@ -67,8 +68,8 @@ export function showRunComplete(
         <div class="cell"><span class="k">Max combo</span><span class="v">x${summary.maxCombo}</span></div>
         <div class="cell"><span class="k">Status</span><span class="v">${summary.finished ? "FINISHED" : "QUIT"}</span></div>
       </div>
+      <div class="rc-status" id="rc-status">Saving run…</div>
       <div class="rc-buttons">
-        <button class="btn-primary" id="rc-submit">Submit Score</button>
         <button class="btn-secondary" id="rc-retry">Retry</button>
         <button class="btn-secondary" id="rc-new">New Track</button>
       </div>
@@ -76,9 +77,21 @@ export function showRunComplete(
   `;
   root.appendChild(overlay);
 
-  overlay.querySelector<HTMLButtonElement>("#rc-submit")!.addEventListener("click", handlers.onSubmit);
   overlay.querySelector<HTMLButtonElement>("#rc-retry")!.addEventListener("click", handlers.onRetry);
   overlay.querySelector<HTMLButtonElement>("#rc-new")!.addEventListener("click", handlers.onNewTrack);
+
+  // Auto-submit the run in the background; reflect status on the card.
+  const statusEl = overlay.querySelector<HTMLDivElement>("#rc-status")!;
+  handlers
+    .autoSubmit()
+    .then(() => {
+      statusEl.textContent = "Saved ✓";
+      statusEl.classList.add("ok");
+    })
+    .catch(() => {
+      statusEl.textContent = "Save failed — retry to try again";
+      statusEl.classList.add("fail");
+    });
 
   return () => overlay.remove();
 }

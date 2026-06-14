@@ -49,9 +49,9 @@ export interface TrackSummary {
   stats: TrackStats;
 }
 
-/** Difficulty tiers — each is a separately generated, more dramatic track set. */
-export type Tier = "CHILL" | "VOLATILE" | "DEGEN";
-export const TIERS: Tier[] = ["CHILL", "VOLATILE", "DEGEN"];
+/** Difficulty tiers — each is a separately generated, more dramatic track set (easiest → hardest). */
+export type Tier = "VOLATILE" | "DEGEN" | "SAVAGE";
+export const TIERS: Tier[] = ["VOLATILE", "DEGEN", "SAVAGE"];
 
 export interface TierTracks {
   /** Window prize ladder [rank1Sol, rank2Sol, rank3Sol] for this tier. */

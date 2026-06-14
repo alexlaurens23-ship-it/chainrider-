@@ -9,28 +9,40 @@
  */
 import "dotenv/config";
 
+type Period = "1Y" | "6M" | "3M";
+
 interface SeedMap {
   slug: string;
   symbol: string;
   name: string;
   source: "coingecko" | "geckoterminal";
   source_id: string;
-  period: "90D" | "180D" | "1Y" | "ALL";
+  period: Period;
 }
 
-// Launch set: 4 coins at 1Y. Each map generates 3 tiers × 2 modes = 6 frozen
-// tracks server-side (→ 24 tracks total). DOGE is intentionally included as an
-// idiosyncratic, BTC-uncorrelated coin → genuinely different terrain shape.
-const SEED_MAPS: SeedMap[] = [
-  { slug: "btc-1y", symbol: "BTC", name: "Bitcoin 1Y", source: "coingecko", source_id: "bitcoin", period: "1Y" },
-  { slug: "eth-1y", symbol: "ETH", name: "Ethereum 1Y", source: "coingecko", source_id: "ethereum", period: "1Y" },
-  { slug: "sol-1y", symbol: "SOL", name: "Solana 1Y", source: "coingecko", source_id: "solana", period: "1Y" },
-  { slug: "doge-1y", symbol: "DOGE", name: "Dogecoin 1Y", source: "coingecko", source_id: "dogecoin", period: "1Y" },
-  // ── Memecoin maps (GeckoTerminal pools) ─────────────────────────────────
-  // TODO(owner): paste the pool address and uncomment. source_id format is
-  // "{network}:{poolAddress}". Requires widening the cr_maps period check to 90D.
-  // { slug: "meme1-90d", symbol: "MEME1", name: "Memecoin One 90D", source: "geckoterminal", source_id: "solana:<POOL_ADDRESS>", period: "90D" },
+// Launch set: 6 coins (4 majors + POPCAT/BONK, both data-validated for sustained
+// rolling volatility across all 3 windows) × 3 periods (1Y/6M/3M). Each map
+// generates 3 tiers × 2 modes = 6 frozen tracks → 6×3×6 = 108 tracks total.
+const COINS: { symbol: string; name: string; id: string }[] = [
+  { symbol: "BTC", name: "Bitcoin", id: "bitcoin" },
+  { symbol: "ETH", name: "Ethereum", id: "ethereum" },
+  { symbol: "SOL", name: "Solana", id: "solana" },
+  { symbol: "DOGE", name: "Dogecoin", id: "dogecoin" },
+  { symbol: "POPCAT", name: "Popcat", id: "popcat" },
+  { symbol: "BONK", name: "Bonk", id: "bonk" },
 ];
+const PERIODS: Period[] = ["1Y", "6M", "3M"];
+
+const SEED_MAPS: SeedMap[] = COINS.flatMap((c) =>
+  PERIODS.map((period) => ({
+    slug: `${c.symbol.toLowerCase()}-${period.toLowerCase()}`,
+    symbol: c.symbol,
+    name: `${c.name} ${period}`,
+    source: "coingecko" as const,
+    source_id: c.id,
+    period,
+  })),
+);
 
 /** CoinGecko free tier is ~5-15 req/min; each map costs one upstream call. */
 const DELAY_BETWEEN_MAPS_MS = 15_000;

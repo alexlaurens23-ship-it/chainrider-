@@ -82,6 +82,10 @@ export interface BikeTune {
   /** post-solve normal impulse above which a misaligned landing is a crash. */
   hardLandingImpulse: number;
   groundFriction: number;
+  /** Below this speed (m/s), motor torque gets the launch boost (scales to ×1 at the threshold). */
+  launchSpeedThreshold: number;
+  /** Motor-torque multiplier at standstill for the low-speed launch assist. */
+  launchBoost: number;
 }
 
 /** Locked tune (P2 final, 2026-06-12) — found in the playground. Source of truth over Appendix A. */
@@ -118,6 +122,8 @@ export const DEFAULT_TUNE: BikeTune = {
   landingToleranceDeg: 30,
   hardLandingImpulse: 40,
   groundFriction: 1.45,
+  launchSpeedThreshold: 3,
+  launchBoost: 1.8,
 };
 
 export interface SimOptions {

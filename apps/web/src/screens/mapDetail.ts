@@ -19,6 +19,11 @@ function asTier(v: string | undefined): Tier | null {
   return v && (TIERS as string[]).includes(v) ? (v as Tier) : null;
 }
 
+/** Danger glow class for the hotter tiers (CSS adds the colored shadow). */
+function glowClass(tier: Tier): string {
+  return tier === "SAVAGE" ? " savage" : tier === "DEGEN" ? " degen" : "";
+}
+
 export function createMapDetailScreen(): Screen {
   let tier: Tier = DEFAULT_TIER;
   let mode: Mode = "raw";
@@ -71,7 +76,7 @@ export function createMapDetailScreen(): Screen {
       .join("");
 
     const tierBtns = TIERS.map(
-      (t) => `<button class="tier-btn${t === "DEGEN" ? " degen" : ""}" data-tier="${t}">${t}</button>`,
+      (t) => `<button class="tier-btn${glowClass(t)}" data-tier="${t}">${t}</button>`,
     ).join("");
 
     detail.innerHTML = `
@@ -180,7 +185,7 @@ function renderStats(
     ? prize.map((p, i) => `${ordinal(i + 1)} ${formatSol(p)}`).join(" · ") + " SOL"
     : "—";
   el.innerHTML = `
-    <div><span class="badge${tier === "DEGEN" ? " degen" : ""}" style="background:${tierColor(tier)}">${tier}</span></div>
+    <div><span class="badge${glowClass(tier)}" style="background:${tierColor(tier)}">${tier}</span></div>
     <div><div class="stat-num">${s.pointCount}</div><div class="stat-label">POINTS</div></div>
     <div><div class="stat-num">${s.volatility.toFixed(2)}</div><div class="stat-label">VOLATILITY</div></div>
     <div><div class="stat-num">${s.maxSlopeDeg.toFixed(1)}°</div><div class="stat-label">MAX SLOPE</div></div>

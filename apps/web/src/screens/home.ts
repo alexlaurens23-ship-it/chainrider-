@@ -1,6 +1,6 @@
-import { getMapsCached, getStats, getTrackCached, TIERS, type MapEntry, type StatsResponse } from "../net";
+import { getMapsCached, getStats, getTrackCached, type MapEntry, type StatsResponse } from "../net";
 import type { Screen } from "../router";
-import { formatCountdown, formatSol, tierColor } from "../ui/format";
+import { formatCountdown, formatSol } from "../ui/format";
 import { drawSparkline } from "../ui/sparkline";
 
 export function createHomeScreen(): Screen {
@@ -69,39 +69,35 @@ export function createHomeScreen(): Screen {
   };
 }
 
-const SPARK_ACCENT = "#00e5ff"; // brand cyan — the card's chips carry tier identity
+const SPARK_ACCENT = "#00e5ff"; // brand cyan
 
 function renderCards(grid: HTMLElement, maps: MapEntry[]): void {
   if (maps.length === 0) {
     grid.innerHTML = `<div class="empty-state">No tracks yet. Seed some maps from the admin API.</div>`;
     return;
   }
-  grid.replaceChildren();
+  // One card per coin: pick the 1Y map as the representative (periods are chosen
+  // inside MapDetail via its period tabs).
+  const bySymbol = new Map<string, MapEntry>();
   for (const map of maps) {
-    const base = `#/map/${encodeURIComponent(map.slug)}/${encodeURIComponent(map.period)}`;
-    const chips = TIERS.map((tier) => {
-      const prize = map.tiers[tier]?.prize?.[0];
-      const danger = tier === "DEGEN" ? " degen" : "";
-      return `<a class="tier-chip${danger}" style="background:${tierColor(tier)}" href="${base}/${tier}">
-        <span class="tc-name">${tier}</span>
-        <span class="tc-prize">${prize != null ? `${formatSol(prize)} SOL` : "—"}</span>
-      </a>`;
-    }).join("");
+    const existing = bySymbol.get(map.symbol);
+    if (!existing || map.period === "1Y") bySymbol.set(map.symbol, map);
+  }
 
-    const card = document.createElement("div");
+  grid.replaceChildren();
+  for (const map of bySymbol.values()) {
+    const coinName = map.name.replace(/\s+(1Y|6M|3M)$/i, "");
+    const card = document.createElement("a");
     card.className = "track-card";
+    card.href = `#/map/${encodeURIComponent(map.slug)}/${encodeURIComponent(map.period)}`;
     card.innerHTML = `
-      <a class="card-link" href="${base}">
-        <div class="card-top">
-          <div>
-            <div class="symbol">${map.symbol}</div>
-            <div class="name">${map.name}</div>
-          </div>
-          <span class="period-pill">${map.period}</span>
+      <div class="card-top">
+        <div>
+          <div class="symbol">${map.symbol}</div>
+          <div class="name">${coinName}</div>
         </div>
-        <canvas class="spark"></canvas>
-      </a>
-      <div class="tier-chips">${chips}</div>
+      </div>
+      <canvas class="spark"></canvas>
     `;
     grid.appendChild(card);
 

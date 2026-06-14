@@ -307,6 +307,10 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
     pitchError = wrapAngle(sim.chassis.getAngle() - groundSlope);
   }
 
+  // Speed as of the previous step's end — drives the low-speed launch assist.
+  const preVel = sim.chassis.getLinearVelocity();
+  const preSpeed = Math.sqrt(preVel.x * preVel.x + preVel.y * preVel.y);
+
   // Drive / brake (brake overrides throttle; X-Moto-style strong stop).
   if (brake) {
     sim.rearJoint.setMotorSpeed(0);
@@ -335,6 +339,13 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
             (pitchError - ANTI_WHEELIE_START) / (ANTI_WHEELIE_END - ANTI_WHEELIE_START),
           );
           motorTorque *= 1 + (tune.antiWheelieFloor - 1) * t;
+        }
+        // Low-speed launch assist: extra torque ONLY from near-standstill so the
+        // bike can break traction up a steep slope; scales linearly to ×1 at
+        // launchSpeedThreshold and is exactly zero above it (no change to normal
+        // riding, no new mid-ride wheelie behavior).
+        if (preSpeed < tune.launchSpeedThreshold) {
+          motorTorque *= 1 + (tune.launchBoost - 1) * (1 - preSpeed / tune.launchSpeedThreshold);
         }
       }
       sim.rearJoint.setMotorSpeed(-tune.maxOmega);

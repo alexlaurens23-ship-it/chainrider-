@@ -26,7 +26,7 @@ export const SCORING_CONFIG = {
   /** Each crash adds this to the effective finish time. */
   crashTimePenaltyMs: 3000,
   /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */
-  parPaceMps: { CHILL: 9, VOLATILE: 8, DEGEN: 7 },
+  parPaceMps: { VOLATILE: 8, DEGEN: 7, SAVAGE: 6 },
 } as const;
 
 export type ScoringConfig = typeof SCORING_CONFIG;

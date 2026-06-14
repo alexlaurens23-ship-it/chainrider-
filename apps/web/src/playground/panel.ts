@@ -37,6 +37,8 @@ const RANGES: Record<keyof BikeTune, Range> = {
   landingToleranceDeg: [5, 80, 1],
   hardLandingImpulse: [1, 200, 1],
   groundFriction: [0, 1.5, 0.05],
+  launchSpeedThreshold: [0, 20, 0.5],
+  launchBoost: [1, 3, 0.05],
 };
 
 const REBUILD_DEBOUNCE_MS = 150;
