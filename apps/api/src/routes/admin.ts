@@ -78,6 +78,7 @@ function trackInsertRow(mapId: number, version: number, gt: GeneratedTrack) {
     world_length: gt.stats.worldLength,
     max_slope_deg: gt.stats.maxSlopeDeg,
     volatility: gt.stats.volatility,
+    difficulty_score: gt.stats.difficultyScore,
     par_time_ms: gt.parTimeMs,
   };
 }

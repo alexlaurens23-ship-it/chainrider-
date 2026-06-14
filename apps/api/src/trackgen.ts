@@ -48,6 +48,9 @@ export const TIER_CONFIG: Record<Tier, { amplify: number; roughness: number }> =
  */
 export const PERIOD_AMPLITUDE: Record<string, number> = { "1Y": 1.0, "6M": 1.25, "3M": 1.5 };
 
+/** Segments steeper than this (degrees) count toward the steepness grade. */
+export const STEEP_THRESHOLD_DEG = 35;
+
 export interface TrackStats {
   /** x-span of the polyline in metres (the sim adds its own lead-in/run-out). */
   worldLength: number;
@@ -56,9 +59,17 @@ export interface TrackStats {
   volatility: number;
   difficulty: Difficulty;
   pointCount: number;
+  /**
+   * Steepness grade for the payout pool: fraction of segments steeper than
+   * STEEP_THRESHOLD_DEG (the primary metric) plus a tiny avg-absolute-slope
+   * tiebreaker (×1e-6, only separates exact-density ties — density always
+   * dominates since its smallest step ≫ the tiebreaker's max). Deterministic.
+   */
+  difficultyScore: number;
 }
 
 const round4 = (v: number): number => Math.round(v * 1e4) / 1e4;
+const round8 = (v: number): number => Math.round(v * 1e8) / 1e8;
 
 function assertTrack(points: readonly TrackPoint[]): void {
   if (points.length < 2) throw new Error("track needs at least 2 points");
@@ -281,13 +292,20 @@ export function stats(points: readonly TrackPoint[]): TrackStats {
   assertTrack(points);
   const angles: number[] = [];
   let maxSlope = 0;
+  let steepCount = 0;
+  let slopeSum = 0;
   for (let i = 1; i < points.length; i++) {
     const dx = points[i][0] - points[i - 1][0];
     const dy = points[i][1] - points[i - 1][1];
     const deg = (Math.atan(Math.abs(dy) / dx) * 180) / Math.PI;
     angles.push(deg);
+    slopeSum += deg;
     if (deg > maxSlope) maxSlope = deg;
+    if (deg > STEEP_THRESHOLD_DEG) steepCount += 1;
   }
+  const segments = angles.length;
+  const steepDensity = segments > 0 ? steepCount / segments : 0;
+  const avgAbsSlopeDeg = segments > 0 ? slopeSum / segments : 0;
   const maxSlopeDeg = round4(maxSlope);
   return {
     worldLength: round4(points[points.length - 1][0] - points[0][0]),
@@ -295,6 +313,7 @@ export function stats(points: readonly TrackPoint[]): TrackStats {
     volatility: round4(populationStdev(angles)),
     difficulty: difficultyFor(maxSlopeDeg),
     pointCount: points.length,
+    difficultyScore: round8(steepDensity + avgAbsSlopeDeg * 1e-6),
   };
 }
 

@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { leaderboardsRoutes } from "./routes/leaderboards.js";
+import { payoutPoolRoutes } from "./routes/payoutPool.js";
 import { payoutsRoutes } from "./routes/payouts.js";
 import { runsRoutes } from "./routes/runs.js";
 import { statsRoutes } from "./routes/stats.js";
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   await app.register(runsRoutes, { prefix: "/api/runs" });
   await app.register(leaderboardsRoutes, { prefix: "/api/leaderboards" });
   await app.register(payoutsRoutes, { prefix: "/api/payouts" });
+  await app.register(payoutPoolRoutes, { prefix: "/api/payout-pool" });
   await app.register(adminRoutes, { prefix: "/api/admin" });
 
   await app.listen({ port: PORT, host: "0.0.0.0" });

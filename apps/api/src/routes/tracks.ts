@@ -26,6 +26,7 @@ interface TrackSummaryRow {
   world_length: number;
   max_slope_deg: number;
   volatility: number;
+  difficulty_score: number | null;
   par_time_ms: number | null;
 }
 
@@ -40,6 +41,7 @@ function trackSummary(t: TrackSummaryRow) {
       volatility: t.volatility,
       difficulty: difficultyFor(t.max_slope_deg),
       pointCount: t.point_count,
+      difficultyScore: t.difficulty_score,
     },
   };
 }
@@ -71,7 +73,7 @@ export const mapsRoutes: FastifyPluginAsync = async (app) => {
       const tracksRes = await db
         .from("cr_tracks")
         .select(
-          "id,map_id,tier,mode,version,point_count,world_length,max_slope_deg,volatility,par_time_ms",
+          "id,map_id,tier,mode,version,point_count,world_length,max_slope_deg,volatility,difficulty_score,par_time_ms",
         )
         .eq("active", true)
         .in(
