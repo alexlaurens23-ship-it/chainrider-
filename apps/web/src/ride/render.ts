@@ -1,3 +1,4 @@
+import { terrainYAt } from "@chainrider/physics";
 import type { BikeTune, SimSnapshot, TrackInfo } from "@chainrider/physics";
 import { drawBike } from "../shared/bike";
 import { CHART_UP, segmentColor, visibleRange } from "./chart";
@@ -89,7 +90,7 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
 
       drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune });
 
-      drawMinimap(minimap, bakedMinimap, chassisX, minX, maxX);
+      drawMinimap(minimap, bakedMinimap, terrain, chassisX, minX, maxX, minY, maxY);
     },
   };
 }
@@ -274,9 +275,12 @@ function bakeMinimap(
 function drawMinimap(
   minimap: HTMLCanvasElement,
   baked: HTMLCanvasElement,
+  terrain: TrackInfo["terrain"],
   chassisX: number,
   minX: number,
   maxX: number,
+  minY: number,
+  maxY: number,
 ): void {
   const ctx = minimap.getContext("2d");
   if (!ctx) return;
@@ -288,13 +292,18 @@ function drawMinimap(
 
   const pad = 5;
   const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
   const t = clamp((chassisX - minX) / spanX, 0, 1);
   const dotX = pad + t * (MINIMAP_W - pad * 2);
+  // Ride the dot on the polyline: sample the track y at the bike's x and map it
+  // through the same transform the baked line uses.
+  const trackY = terrainYAt(terrain, chassisX);
+  const dotY = MINIMAP_H - pad - ((trackY - minY) / spanY) * (MINIMAP_H - pad * 2);
   ctx.fillStyle = CHART_UP;
   ctx.shadowColor = CHART_UP;
   ctx.shadowBlur = 6;
   ctx.beginPath();
-  ctx.arc(dotX, MINIMAP_H / 2, 4, 0, Math.PI * 2);
+  ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowBlur = 0;
 }
