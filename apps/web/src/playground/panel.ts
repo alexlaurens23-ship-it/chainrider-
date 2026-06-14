@@ -43,6 +43,8 @@ const RANGES: Record<keyof BikeTune, Range> = {
   reverseMotorTorque: [0, 80, 1],
   reverseMotorSpeed: [0, 40, 0.5],
   reverseMaxSpeed: [1, 10, 0.5],
+  reverseHillAssist: [0, 1, 0.05],
+  reverseHillMinSlopeDeg: [0, 45, 1],
 };
 
 const REBUILD_DEBOUNCE_MS = 150;

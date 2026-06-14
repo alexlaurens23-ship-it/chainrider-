@@ -94,6 +94,10 @@ export interface BikeTune {
   reverseMotorSpeed: number;
   /** Hard cap on backward chassis speed, m/s — reverse thrust cuts above it. */
   reverseMaxSpeed: number;
+  /** Reverse incline traction: fraction of m·g·sin(slope) pushed back-up-slope when reversing up a steep wall. */
+  reverseHillAssist: number;
+  /** Reverse incline assist engages when backing up a slope steeper than this (degrees). */
+  reverseHillMinSlopeDeg: number;
 }
 
 /** Locked tune (P2 final, 2026-06-12) — found in the playground. Source of truth over Appendix A. */
@@ -133,9 +137,11 @@ export const DEFAULT_TUNE: BikeTune = {
   launchSpeedThreshold: 3,
   launchBoost: 1.8,
   reverseEngageSpeed: 1.5,
-  reverseMotorTorque: 30,
-  reverseMotorSpeed: 12,
-  reverseMaxSpeed: 4,
+  reverseMotorTorque: 60,
+  reverseMotorSpeed: 17,
+  reverseMaxSpeed: 5.5,
+  reverseHillAssist: 0.5,
+  reverseHillMinSlopeDeg: 15,
 };
 
 export interface SimOptions {

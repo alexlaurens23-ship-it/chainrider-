@@ -314,11 +314,13 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   // (robust on slopes/dips). >0 = moving forward.
   const fwdDir = sim.chassis.getWorldVector(new Vec2(1, 0));
   const forwardVel = preVel.x * fwdDir.x + preVel.y * fwdDir.y;
+  // S/down reverses (vs brakes) when grounded and at/below crawl speed.
+  const reversing = brake && anyOnGround && forwardVel <= tune.reverseEngageSpeed;
 
   // Drive / brake. S/down is context-aware: brake when moving forward, reverse
   // when crawling/stopped on the ground (grounded-only, low-speed-only, capped).
   if (brake) {
-    if (anyOnGround && forwardVel <= tune.reverseEngageSpeed) {
+    if (reversing) {
       // Reverse: positive motor speed = backward (forward drive uses -maxOmega).
       // The reverse motor first decelerates any residual forward roll, then
       // backs up — so braking-to-stop smoothly rolls into reverse, no snap.
@@ -412,6 +414,22 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
     const force = tune.hillAssist * totalMass * -GRAVITY_Y * Math.sin(groundSlope);
     sim.chassis.applyForce(
       new Vec2(force * Math.cos(groundSlope), force * Math.sin(groundSlope)),
+      sim.chassis.getWorldCenter(),
+      true,
+    );
+  }
+
+  // Reverse incline traction assist: backing up a slope that descends in +x
+  // (groundSlope < 0) adds a surface force up-slope in the BACKWARD direction —
+  // the arcade cheat that lets the bike climb out of a steep V instead of the
+  // rigid rear wheel slipping. A chassis body force is grip-independent, so wheel
+  // micro-bounce no longer matters. Mirrors hillAssist; zero on flat/forward/air.
+  const reverseHillMin = (tune.reverseHillMinSlopeDeg * Math.PI) / 180;
+  if (reversing && groundSlope < -reverseHillMin) {
+    const totalMass = sim.chassis.getMass() + sim.rearWheel.getMass() + sim.frontWheel.getMass();
+    const force = tune.reverseHillAssist * totalMass * -GRAVITY_Y * Math.sin(-groundSlope);
+    sim.chassis.applyForce(
+      new Vec2(-force * Math.cos(groundSlope), -force * Math.sin(groundSlope)),
       sim.chassis.getWorldCenter(),
       true,
     );
