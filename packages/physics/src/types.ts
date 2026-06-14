@@ -86,6 +86,14 @@ export interface BikeTune {
   launchSpeedThreshold: number;
   /** Motor-torque multiplier at standstill for the low-speed launch assist. */
   launchBoost: number;
+  /** At/below this forward speed (m/s), grounded, S/down reverses instead of braking. */
+  reverseEngageSpeed: number;
+  /** Rear motor torque while reversing, N·m (slow but usable). */
+  reverseMotorTorque: number;
+  /** Rear motor target speed while reversing, rad/s (positive = backward). */
+  reverseMotorSpeed: number;
+  /** Hard cap on backward chassis speed, m/s — reverse thrust cuts above it. */
+  reverseMaxSpeed: number;
 }
 
 /** Locked tune (P2 final, 2026-06-12) — found in the playground. Source of truth over Appendix A. */
@@ -124,6 +132,10 @@ export const DEFAULT_TUNE: BikeTune = {
   groundFriction: 1.45,
   launchSpeedThreshold: 3,
   launchBoost: 1.8,
+  reverseEngageSpeed: 1.5,
+  reverseMotorTorque: 30,
+  reverseMotorSpeed: 12,
+  reverseMaxSpeed: 4,
 };
 
 export interface SimOptions {

@@ -39,6 +39,10 @@ const RANGES: Record<keyof BikeTune, Range> = {
   groundFriction: [0, 1.5, 0.05],
   launchSpeedThreshold: [0, 20, 0.5],
   launchBoost: [1, 3, 0.05],
+  reverseEngageSpeed: [0, 5, 0.1],
+  reverseMotorTorque: [0, 80, 1],
+  reverseMotorSpeed: [0, 40, 0.5],
+  reverseMaxSpeed: [1, 10, 0.5],
 };
 
 const REBUILD_DEBOUNCE_MS = 150;

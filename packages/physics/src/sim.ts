@@ -310,14 +310,34 @@ export function stepSim(sim: Sim, keymask: Keymask): void {
   // Speed as of the previous step's end — drives the low-speed launch assist.
   const preVel = sim.chassis.getLinearVelocity();
   const preSpeed = Math.sqrt(preVel.x * preVel.x + preVel.y * preVel.y);
+  // Signed forward speed = velocity projected onto the chassis-forward axis
+  // (robust on slopes/dips). >0 = moving forward.
+  const fwdDir = sim.chassis.getWorldVector(new Vec2(1, 0));
+  const forwardVel = preVel.x * fwdDir.x + preVel.y * fwdDir.y;
 
-  // Drive / brake (brake overrides throttle; X-Moto-style strong stop).
+  // Drive / brake. S/down is context-aware: brake when moving forward, reverse
+  // when crawling/stopped on the ground (grounded-only, low-speed-only, capped).
   if (brake) {
-    sim.rearJoint.setMotorSpeed(0);
-    sim.rearJoint.setMaxMotorTorque(tune.rearBrakeTorque);
-    sim.frontJoint.enableMotor(true);
-    sim.frontJoint.setMotorSpeed(0);
-    sim.frontJoint.setMaxMotorTorque(tune.frontBrakeTorque);
+    if (anyOnGround && forwardVel <= tune.reverseEngageSpeed) {
+      // Reverse: positive motor speed = backward (forward drive uses -maxOmega).
+      // The reverse motor first decelerates any residual forward roll, then
+      // backs up — so braking-to-stop smoothly rolls into reverse, no snap.
+      sim.frontJoint.enableMotor(false);
+      if (-forwardVel < tune.reverseMaxSpeed) {
+        sim.rearJoint.setMotorSpeed(tune.reverseMotorSpeed);
+        sim.rearJoint.setMaxMotorTorque(tune.reverseMotorTorque);
+      } else {
+        sim.rearJoint.setMotorSpeed(0);
+        sim.rearJoint.setMaxMotorTorque(0); // at the reverse cap → coast
+      }
+    } else {
+      // Forward braking (moving forward, or airborne) — unchanged behavior.
+      sim.rearJoint.setMotorSpeed(0);
+      sim.rearJoint.setMaxMotorTorque(tune.rearBrakeTorque);
+      sim.frontJoint.enableMotor(true);
+      sim.frontJoint.setMotorSpeed(0);
+      sim.frontJoint.setMaxMotorTorque(tune.frontBrakeTorque);
+    }
   } else {
     sim.frontJoint.enableMotor(false);
     if (throttle) {
