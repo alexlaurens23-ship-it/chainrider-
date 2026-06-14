@@ -91,7 +91,7 @@ async function main(): Promise<void> {
       const slope = (t: string) => body.tiers?.[t]?.raw?.stats?.maxSlopeDeg;
       console.log(
         `  ${map.slug}: ok — ${body.candleCount} candles, ${body.trackCount} tracks; ` +
-          `maxSlope CHILL ${slope("CHILL")}° / VOLATILE ${slope("VOLATILE")}° / DEGEN ${slope("DEGEN")}°`,
+          `maxSlope VOLATILE ${slope("VOLATILE")}° / DEGEN ${slope("DEGEN")}° / SAVAGE ${slope("SAVAGE")}°`,
       );
     } catch (err) {
       failures++;
