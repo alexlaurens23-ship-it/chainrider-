@@ -35,8 +35,26 @@ import type {
 const ALL_INPUT_BITS =
   INPUT.THROTTLE | INPUT.BRAKE | INPUT.LEAN_LEFT | INPUT.LEAN_RIGHT | INPUT.JUMP;
 
-/** Spawn clearance so wheels settle onto the ground instead of starting inside it. */
-const SPAWN_CLEARANCE = 0.02;
+/**
+ * Vertical gap left between the lowest wheel and the highest terrain under the
+ * bike at spawn/respawn, so the bike drops cleanly onto the track instead of
+ * clipping through it. Must be generous enough to clear steep DEGEN sections.
+ */
+const SPAWN_CLEARANCE = 0.3;
+
+/**
+ * Highest terrain surface over [xLo, xHi] (piecewise-linear: the max is at an
+ * endpoint or an interior vertex). Used to lift the spawn pose above the terrain
+ * under the WHOLE bike footprint, not just under the chassis center.
+ */
+function maxTerrainBetween(terrain: readonly TrackPoint[], xLo: number, xHi: number): number {
+  let m = Math.max(terrainYAt(terrain, xLo), terrainYAt(terrain, xHi));
+  for (let i = 0; i < terrain.length; i++) {
+    const [vx, vy] = terrain[i];
+    if (vx > xLo && vx < xHi && vy > m) m = vy;
+  }
+  return m;
+}
 
 function buildTrackInfo(trackPoints: readonly TrackPoint[], tune: BikeTune): TrackInfo {
   if (trackPoints.length < 2) {
@@ -65,12 +83,17 @@ function buildTrackInfo(trackPoints: readonly TrackPoint[], tune: BikeTune): Tra
 
   const spawnX = first[0] - LEAD_IN_METERS / 2;
   const finishX = last[0] + FINISH_FLAG_OFFSET;
+  // Chassis-center height above the highest terrain under the footprint that
+  // still leaves both wheel bottoms SPAWN_CLEARANCE clear. Footprint half-width
+  // covers the wheels (wheelbase/2) and the wider chassis box (chassisWidth/2).
+  const footHalf = Math.max(tune.wheelbase / 2, tune.chassisWidth / 2);
   const chassisCenterAbove = tune.wheelRadius + tune.axleDropY + SPAWN_CLEARANCE;
 
   const checkpoints: Checkpoint[] = [];
   const span = finishX - spawnX;
   for (let x = spawnX; x < finishX; x += span * CHECKPOINT_FRACTION) {
-    checkpoints.push({ x, y: terrainYAt(terrain, x) + chassisCenterAbove });
+    const ground = maxTerrainBetween(terrain, x - footHalf, x + footHalf);
+    checkpoints.push({ x, y: ground + chassisCenterAbove });
   }
 
   return { terrain, spawnX, finishX, killY: minY - KILL_FLOOR_DROP, checkpoints };
