@@ -49,6 +49,17 @@ export interface TrackSummary {
   stats: TrackStats;
 }
 
+/** Difficulty tiers — each is a separately generated, more dramatic track set. */
+export type Tier = "CHILL" | "VOLATILE" | "DEGEN";
+export const TIERS: Tier[] = ["CHILL", "VOLATILE", "DEGEN"];
+
+export interface TierTracks {
+  /** Window prize ladder [rank1Sol, rank2Sol, rank3Sol] for this tier. */
+  prize: number[] | null;
+  raw: TrackSummary | null;
+  smooth: TrackSummary | null;
+}
+
 export interface MapEntry {
   id: number;
   slug: string;
@@ -56,12 +67,14 @@ export interface MapEntry {
   name: string;
   source: string;
   period: string;
-  difficulty: Difficulty;
-  tracks: { raw: TrackSummary | null; smooth: TrackSummary | null };
+  tiers: Record<Tier, TierTracks>;
+  // NOTE: /api/maps still emits legacy `difficulty` + `tracks` (backed by one
+  // tier) but the tier UI reads `tiers` only — intentionally omitted here so
+  // nothing depends on them; remove from the API in a later cleanup.
 }
 
-/** prizeLadder[difficulty] = [rank1Sol, rank2Sol, rank3Sol]. */
-export type PrizeLadder = Record<Difficulty, number[]>;
+/** prizeLadder[tier] = [rank1Sol, rank2Sol, rank3Sol]. */
+export type PrizeLadder = Record<Tier, number[]>;
 
 export interface MapsResponse {
   maps: MapEntry[];

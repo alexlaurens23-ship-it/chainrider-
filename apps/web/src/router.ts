@@ -20,6 +20,8 @@ interface Route {
 const ROUTES: Route[] = [
   { pattern: [], factory: createHomeScreen, scroll: true },
   { pattern: ["map", ":slug", ":period"], factory: createMapDetailScreen, scroll: true },
+  // Same screen with a preselected tier (deep-link from Home's tier chips).
+  { pattern: ["map", ":slug", ":period", ":tier"], factory: createMapDetailScreen, scroll: true },
   { pattern: ["ride", ":trackId"], factory: createRideScreen, scroll: false },
   { pattern: ["playground"], factory: createPlaygroundScreen, scroll: false },
 ];

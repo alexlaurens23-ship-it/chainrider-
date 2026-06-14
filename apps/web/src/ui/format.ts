@@ -1,4 +1,4 @@
-import type { Difficulty } from "../net";
+import type { Difficulty, Tier } from "../net";
 
 const DIFFICULTY_COLORS: Record<Difficulty, string> = {
   easy: "#3ef0a0",
@@ -9,6 +9,17 @@ const DIFFICULTY_COLORS: Record<Difficulty, string> = {
 
 export function difficultyColor(d: Difficulty): string {
   return DIFFICULTY_COLORS[d] ?? "#9fb4c8";
+}
+
+/** Tier identity colors — mint / amber / red, matching the difficulty palette. */
+const TIER_COLORS: Record<Tier, string> = {
+  CHILL: "#3ef0a0",
+  VOLATILE: "#ffc24b",
+  DEGEN: "#ff3c5a",
+};
+
+export function tierColor(tier: Tier): string {
+  return TIER_COLORS[tier] ?? "#9fb4c8";
 }
 
 /** Trim trailing zeros: 0.15 -> "0.15", 0.1 -> "0.1", 1 -> "1". */

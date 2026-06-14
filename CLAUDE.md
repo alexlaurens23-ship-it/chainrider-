@@ -67,13 +67,13 @@ apps/
     vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787.
     index.html                #app root + full <style> (palette, pages, ride HUD, run-complete card).
     src/main.ts               Mounts the router into #app.
-    src/router.ts             Hash router: parse #hash → screen {mount(root,params)/unmount()}; toggles body.no-scroll for game screens.
-    src/net.ts                apiFetch + typed fetchers (getMaps/getTrack/getStats/getLeaderboard/submitRun) + in-memory maps/track caches.
-    src/ui/format.ts          difficultyColor, formatSol/Score/Clock/Countdown.
+    src/router.ts             Hash router: parse #hash → screen {mount(root,params)/unmount()}; toggles body.no-scroll for game screens. #/map/:slug/:period[/:tier] (4-seg = tier deep-link).
+    src/net.ts                apiFetch + typed fetchers + in-memory caches. Tier/TierTracks types; MapEntry.tiers{CHILL,VOLATILE,DEGEN}{prize,raw,smooth} (legacy difficulty/tracks intentionally omitted from the type).
+    src/ui/format.ts          difficultyColor + tierColor (CHILL mint/VOLATILE amber/DEGEN red), formatSol/Score/Clock/Countdown.
     src/ui/sparkline.ts       drawSparkline (home cards). ui/chartPreview.ts: drawChartPreview (map detail, green-up/red-down + fill).
     src/shared/bike.ts        drawBike — shared bike renderer (ride + playground).
-    src/screens/home.ts       Hero + live stats strip (/api/stats) + trending cards (sparkline/badge/prize) + UTC payout countdown.
-    src/screens/mapDetail.ts  Chart preview, period tabs (siblings by symbol), RAW/SMOOTH toggle, stats row + prize ladder, leaderboard (empty until P7), RIDE button.
+    src/screens/home.ts       Hero + live stats strip (/api/stats) + trending cards (sparkline + 3 prized tier chips CHILL/VOLATILE/DEGEN deep-linking to map+tier) + UTC payout countdown.
+    src/screens/mapDetail.ts  TIER selector (primary, default VOLATILE) × RAW/SMOOTH mode → map.tiers[tier][mode]: drives chart preview, stats row + tier badge, prize ladder, leaderboard (empty until P7, keyed to track), RIDE target.
     src/screens/ride.ts       Wires fetch→loop+renderer+hud+input+run-complete; Submit posts real payload to /api/runs/submit.
     src/ride/loop.ts          Fixed-timestep ride loop; change-only [tick,keymask] log (P6 replay); maxCombo/air/speed tracking; 20-min (72000-tick) cap; respawn/quit.
     src/ride/render.ts        Camera (smoothed lookahead + speed zoom 1.0→0.8, kill-floor clamp); terrain culled via binary search (visibleRange) + green/red glow + gradient fill + gridlines; baked minimap + position dot.
@@ -127,13 +127,17 @@ _Update at the end of every session._
 
 - **P4.2 — time-primary scoring + terrain tiers + DOGE** (2026-06-14): bike tune LOCKED (unchanged). **(A) Scoring** reworked time-primary in `scoring.ts`: `score = speedScore + trickBonus`, `speedScore = round(10000·(par/effectiveTime)^1.5)` at finish only, `effectiveTime = finishTime + crashes·3000ms`, `trickBonus = round(rawTrickPoints·0.15)`; DNF = trickBonus only. Crashes no longer subtract points (they cost time); trick detection unchanged (feeds rawTrickPoints). `SCORING_CONFIG` holds all knobs incl. `parPaceMps {CHILL:9,VOLATILE:8,DEGEN:7}`. `computeFinalScore` is a pure exported fn (anti-exploit tested: fast clean > slow+flips+crashes; DNF < finish). Snapshot/FinalResult expose speedScore/trickBonus/effectiveTimeMs. `SIM_VERSION=8`. **(B) Terrain tiers** in `trackgen.ts`: amplify(deviation from mean line ×factor) + roughness(seeded hashPoints→mulberry32, NEVER Math.random) + per-segment 55° clamp (replaces global rescale for tiers → sustained ~55°, not one spike). `generateTier`: CHILL≡normalize byte-identical (existing goldens intact), VOLATILE ×1.8/0.4, DEGEN ×2.8/0.9. Each (map,tier,mode) = a frozen track with per-tier par. `/api/maps` additive: per-map `tiers{}` + legacy difficulty/tracks (from VOLATILE) so the pre-tier UI keeps working; prize_ladder tier-keyed (CHILL/VOLATILE/DEGEN). DOGE added (uncorrelated). Run-complete card shows speed/trick split + time+crash-penalty. Verified: `npm run verify` clean, 8/8 physics + 27/27 api tests pass, real-data smoke (BTC/DOGE 1Y): steep-segment density escalates CHILL→VOLATILE→DEGEN (BTC 1→3→30, DOGE 1→6→20 of 364) and DOGE differs from BTC. **NOT yet applied live** (no Postgres DDL channel here): owner must paste `sql/002_terrain_tiers.sql` then `npm run seed -w @chainrider/api` → 24 tracks.
 
+- **P4.2 applied live** (2026-06-14): owner pasted `sql/002` (+ a follow-up `alter table cr_tracks drop constraint cr_tracks_map_id_mode_version_key` — a pre-existing dashboard constraint that omitted tier; now folded into the 002 files). Seeded 4 coins → **24 tracks** verified via `/api/maps` (per-tier par 243/273/312 s, DEGEN steepest). Migration fix committed as P4.2a.
+
+- **P4.3 — tier selection UI** (2026-06-14): Home/MapDetail now drive all three tiers from `map.tiers[]` (no physics/scoring change). **Home** cards: removed the stale legacy badge; each card = a coin link (symbol + neutral-cyan sparkline from the VOLATILE track) + a row of **3 prized tier chips** (CHILL mint 0.02 / VOLATILE amber 0.05 / DEGEN red 0.12, DEGEN glowing), each deep-linking to `#/map/:slug/:period/:tier`. **MapDetail**: new TIER selector (primary, above RAW/SMOOTH) defaulting VOLATILE; tier × mode → `map.tiers[tier][mode]` drives chart preview, stats row + tier badge, full prize ladder, leaderboard (still P7 empty-state, keyed to the selected track), and RIDE target — all 6 tracks/coin reachable. `tierColor` added to `ui/format.ts`; router gains a 4-seg tier deep-link route. Reverted the temp `LEGACY_TIER=DEGEN` hack back to VOLATILE. Verified: `npm run verify` clean, web `vite build` clean, `/api/maps` carries per-tier prizes + raw/smooth trackIds for all 24. **Single-player feature-complete.**
+
 **In progress**
 - Nothing.
 
 **Next**
-- **Apply P4.2 live**: owner pastes `apps/api/sql/002_terrain_tiers.sql` into the Supabase SQL editor (destructive — wipes the old 3 maps/tracks; 0 runs/payouts reference them), then `npm run seed -w @chainrider/api` (~45 s, 4 coins) → confirm `GET /api/maps` shows 4 coins × 3 tiers and 24 tracks.
-- **Frontend tier-selection UI** (deferred follow-up): Home/MapDetail still read legacy difficulty/tracks (degrade gracefully — prize/ladder blank since prize_ladder is now tier-keyed). Add tier picker consuming `maps[].tiers`.
-- **Manual browser pass** of the game UI: walk `#/` → a map → a ride to finish + Submit; confirm run-complete shows the new speed/trick breakdown; `#/playground` self-test still PASSes.
+- **API cleanup (later)**: the legacy `difficulty` + `tracks` fields in `/api/maps` (`tracks.ts`, backed by `LEGACY_TIER`) are now superseded by the tier UI and unread by the client — drop them from the route + `cr_tracks` legacy plumbing once confirmed nothing else reads them.
+- **Manual browser pass**: walk `#/` (4 coins × 3 tier chips) → `#/map/btc-1y/1Y/DEGEN` (tier selector swaps preview/stats/prize/ride) → a ride to finish + Submit; confirm run-complete speed/trick breakdown; `#/playground` self-test still PASSes.
+- **P6/P7**: server re-sim validation of submitted runs (`/api/runs/submit`) + real per-tier leaderboards (`/api/leaderboards/:trackId`).
 - **ALL-period maps still blocked**: CoinGecko keyless+demo key both 401 on `days=max` (365-day cap is paid-only — confirmed). Decision taken: **add a Binance source** (free, full history via weekly klines) — not yet built. Needs `cr_maps` source check widened to include `binance` + a `chartdata.ts` Binance fetcher.
 - Owner: apply the HARDENING section of `apps/api/sql/001_track_pipeline.sql` in the Supabase SQL editor (freeze trigger, unique indexes, period-constraint widening for 90D/180D memecoin maps).
 - Memecoin maps: paste GeckoTerminal pool addresses into the two placeholders in `apps/api/scripts/seed-maps.ts`.

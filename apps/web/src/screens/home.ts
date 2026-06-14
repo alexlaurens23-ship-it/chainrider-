@@ -1,13 +1,6 @@
-import {
-  getMapsCached,
-  getStats,
-  getTrackCached,
-  type MapEntry,
-  type PrizeLadder,
-  type StatsResponse,
-} from "../net";
+import { getMapsCached, getStats, getTrackCached, TIERS, type MapEntry, type StatsResponse } from "../net";
 import type { Screen } from "../router";
-import { difficultyColor, formatCountdown, formatSol } from "../ui/format";
+import { formatCountdown, formatSol, tierColor } from "../ui/format";
 import { drawSparkline } from "../ui/sparkline";
 
 export function createHomeScreen(): Screen {
@@ -64,7 +57,7 @@ export function createHomeScreen(): Screen {
       countdownTimer = window.setInterval(tickCountdown, 1000);
 
       getMapsCached()
-        .then((res) => renderCards(grid, res.maps, res.prizeLadder))
+        .then((res) => renderCards(grid, res.maps))
         .catch(() => {
           grid.innerHTML = `<div class="empty-state">Could not load tracks. Is the API running?</div>`;
         });
@@ -76,39 +69,47 @@ export function createHomeScreen(): Screen {
   };
 }
 
-function renderCards(grid: HTMLElement, maps: MapEntry[], ladder: PrizeLadder | null): void {
+const SPARK_ACCENT = "#00e5ff"; // brand cyan — the card's chips carry tier identity
+
+function renderCards(grid: HTMLElement, maps: MapEntry[]): void {
   if (maps.length === 0) {
     grid.innerHTML = `<div class="empty-state">No tracks yet. Seed some maps from the admin API.</div>`;
     return;
   }
   grid.replaceChildren();
   for (const map of maps) {
-    const rankPrize = ladder?.[map.difficulty]?.[0];
-    const card = document.createElement("a");
+    const base = `#/map/${encodeURIComponent(map.slug)}/${encodeURIComponent(map.period)}`;
+    const chips = TIERS.map((tier) => {
+      const prize = map.tiers[tier]?.prize?.[0];
+      const danger = tier === "DEGEN" ? " degen" : "";
+      return `<a class="tier-chip${danger}" style="background:${tierColor(tier)}" href="${base}/${tier}">
+        <span class="tc-name">${tier}</span>
+        <span class="tc-prize">${prize != null ? `${formatSol(prize)} SOL` : "—"}</span>
+      </a>`;
+    }).join("");
+
+    const card = document.createElement("div");
     card.className = "track-card";
-    card.href = `#/map/${encodeURIComponent(map.slug)}/${encodeURIComponent(map.period)}`;
     card.innerHTML = `
-      <div class="card-top">
-        <div>
-          <div class="symbol">${map.symbol}</div>
-          <div class="name">${map.name}</div>
+      <a class="card-link" href="${base}">
+        <div class="card-top">
+          <div>
+            <div class="symbol">${map.symbol}</div>
+            <div class="name">${map.name}</div>
+          </div>
+          <span class="period-pill">${map.period}</span>
         </div>
-        <span class="badge" style="background:${difficultyColor(map.difficulty)}">${map.difficulty}</span>
-      </div>
-      <canvas class="spark"></canvas>
-      <div class="card-bottom">
-        <span class="period-pill">${map.period}</span>
-        <span class="prize">${rankPrize != null ? `🏆 ${formatSol(rankPrize)} SOL` : ""}</span>
-      </div>
+        <canvas class="spark"></canvas>
+      </a>
+      <div class="tier-chips">${chips}</div>
     `;
     grid.appendChild(card);
 
     const canvas = card.querySelector<HTMLCanvasElement>(".spark")!;
-    const rawTrackId = map.tracks.raw?.trackId;
-    const accent = difficultyColor(map.difficulty);
-    if (rawTrackId != null) {
-      getTrackCached(rawTrackId)
-        .then((t) => drawSparkline(canvas, t.points, accent))
+    const sparkTrackId = map.tiers.VOLATILE?.raw?.trackId;
+    if (sparkTrackId != null) {
+      getTrackCached(sparkTrackId)
+        .then((t) => drawSparkline(canvas, t.points, SPARK_ACCENT))
         .catch(() => {
           /* sparkline is decorative; ignore fetch failures */
         });

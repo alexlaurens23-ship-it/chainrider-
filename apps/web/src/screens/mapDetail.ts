@@ -2,22 +2,32 @@ import {
   getLeaderboard,
   getMapsCached,
   getTrackCached,
+  TIERS,
   type LeaderRow,
   type MapEntry,
-  type PrizeLadder,
+  type Tier,
   type TrackSummary,
 } from "../net";
 import type { Screen } from "../router";
 import { drawChartPreview } from "../ui/chartPreview";
-import { difficultyColor, formatClock, formatScore, formatSol } from "../ui/format";
+import { formatClock, formatScore, formatSol, tierColor } from "../ui/format";
 
 type Mode = "raw" | "smooth";
+const DEFAULT_TIER: Tier = "VOLATILE";
+
+function asTier(v: string | undefined): Tier | null {
+  return v && (TIERS as string[]).includes(v) ? (v as Tier) : null;
+}
 
 export function createMapDetailScreen(): Screen {
+  let tier: Tier = DEFAULT_TIER;
   let mode: Mode = "raw";
 
   return {
     mount(root, params) {
+      tier = asTier(params.tier) ?? DEFAULT_TIER;
+      mode = "raw";
+
       const page = document.createElement("div");
       page.className = "page";
       page.innerHTML = `
@@ -40,7 +50,7 @@ export function createMapDetailScreen(): Screen {
           const siblings = res.maps
             .filter((m) => m.symbol === map.symbol)
             .sort((a, b) => a.period.localeCompare(b.period));
-          render(detail, map, siblings, res.prizeLadder);
+          render(detail, map, siblings);
         })
         .catch(() => {
           detail.innerHTML = `<div class="empty-state">Could not load map. Is the API running?</div>`;
@@ -52,23 +62,25 @@ export function createMapDetailScreen(): Screen {
     },
   };
 
-  function render(
-    detail: HTMLElement,
-    map: MapEntry,
-    siblings: MapEntry[],
-    ladder: PrizeLadder | null,
-  ): void {
-    const tabs = siblings
+  function render(detail: HTMLElement, map: MapEntry, siblings: MapEntry[]): void {
+    const periodTabs = siblings
       .map((s) => {
         const active = s.slug === map.slug ? " active" : "";
         return `<button class="tab${active}" data-href="#/map/${encodeURIComponent(s.slug)}/${encodeURIComponent(s.period)}">${s.period}</button>`;
       })
       .join("");
 
+    const tierBtns = TIERS.map(
+      (t) => `<button class="tier-btn${t === "DEGEN" ? " degen" : ""}" data-tier="${t}">${t}</button>`,
+    ).join("");
+
     detail.innerHTML = `
       <h1 class="hero-title" style="font-size:38px">${map.symbol}</h1>
       <p class="hero-tagline">${map.name}</p>
-      <div class="tabs">${tabs}</div>
+      <div class="tabs">${periodTabs}</div>
+      <div class="control-label">DIFFICULTY TIER</div>
+      <div class="tier-toggle">${tierBtns}</div>
+      <div class="control-label">TERRAIN MODE</div>
       <div class="mode-toggle">
         <button class="mode-btn" data-mode="raw">RAW</button>
         <button class="mode-btn" data-mode="smooth">SMOOTH</button>
@@ -93,13 +105,23 @@ export function createMapDetailScreen(): Screen {
     const statsEl = detail.querySelector<HTMLDivElement>("#stats")!;
     const boardEl = detail.querySelector<HTMLDivElement>("#board")!;
     const rideBtn = detail.querySelector<HTMLButtonElement>("#ride-btn")!;
+    const tierBtnEls = detail.querySelectorAll<HTMLButtonElement>(".tier-btn");
     const modeBtns = detail.querySelectorAll<HTMLButtonElement>(".mode-btn");
 
-    const applyMode = (): void => {
+    const applySelection = (): void => {
+      for (const btn of tierBtnEls) {
+        const t = btn.dataset.tier as Tier;
+        const on = t === tier;
+        btn.classList.toggle("active", on);
+        btn.style.background = on ? tierColor(t) : "";
+        btn.style.color = on ? "#05060a" : "";
+      }
       for (const btn of modeBtns) btn.classList.toggle("active", btn.dataset.mode === mode);
-      const summary = map.tracks[mode];
+
+      const summary = map.tiers[tier]?.[mode] ?? null;
+      const prize = map.tiers[tier]?.prize ?? null;
       renderPreview(preview, summary);
-      renderStats(statsEl, map, summary, ladder);
+      renderStats(statsEl, tier, summary, prize);
       renderBoard(boardEl, summary);
       if (summary) {
         rideBtn.disabled = false;
@@ -112,16 +134,25 @@ export function createMapDetailScreen(): Screen {
       }
     };
 
+    for (const btn of tierBtnEls) {
+      btn.addEventListener("click", () => {
+        const next = asTier(btn.dataset.tier);
+        if (next && next !== tier) {
+          tier = next;
+          applySelection();
+        }
+      });
+    }
     for (const btn of modeBtns) {
       btn.addEventListener("click", () => {
         const next = btn.dataset.mode as Mode;
         if (next && next !== mode) {
           mode = next;
-          applyMode();
+          applySelection();
         }
       });
     }
-    applyMode();
+    applySelection();
   }
 }
 
@@ -136,24 +167,23 @@ function renderPreview(canvas: HTMLCanvasElement, summary: TrackSummary | null):
 
 function renderStats(
   el: HTMLElement,
-  map: MapEntry,
+  tier: Tier,
   summary: TrackSummary | null,
-  ladder: PrizeLadder | null,
+  prize: number[] | null,
 ): void {
   if (!summary) {
-    el.innerHTML = `<div class="empty-state" style="margin:0">This mode isn't available for this map yet.</div>`;
+    el.innerHTML = `<div class="empty-state" style="margin:0">This tier/mode isn't available for this map yet.</div>`;
     return;
   }
   const s = summary.stats;
-  const prizes = ladder?.[map.difficulty];
-  const ladderText = prizes
-    ? prizes.map((p, i) => `${ordinal(i + 1)} ${formatSol(p)}`).join(" · ") + " SOL"
+  const ladderText = prize
+    ? prize.map((p, i) => `${ordinal(i + 1)} ${formatSol(p)}`).join(" · ") + " SOL"
     : "—";
   el.innerHTML = `
+    <div><span class="badge${tier === "DEGEN" ? " degen" : ""}" style="background:${tierColor(tier)}">${tier}</span></div>
     <div><div class="stat-num">${s.pointCount}</div><div class="stat-label">POINTS</div></div>
     <div><div class="stat-num">${s.volatility.toFixed(2)}</div><div class="stat-label">VOLATILITY</div></div>
     <div><div class="stat-num">${s.maxSlopeDeg.toFixed(1)}°</div><div class="stat-label">MAX SLOPE</div></div>
-    <div><span class="badge" style="background:${difficultyColor(map.difficulty)}">${map.difficulty}</span></div>
     <div style="flex:1"><div class="ladder">${ladderText}</div><div class="stat-label">WINDOW PRIZE LADDER</div></div>
   `;
 }
@@ -163,6 +193,7 @@ function renderBoard(el: HTMLElement, summary: TrackSummary | null): void {
     el.innerHTML = "";
     return;
   }
+  // Keyed to the selected tier+mode track so it's ready when P7 fills it in.
   el.innerHTML = `<div class="empty-state">Loading…</div>`;
   getLeaderboard(summary.trackId)
     .then((rows: LeaderRow[]) => {
