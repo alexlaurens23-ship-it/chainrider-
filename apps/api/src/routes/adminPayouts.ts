@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getDb } from "../db.js";
 import { markPayoutPaid } from "../payoutOps.js";
-// DEV-ONLY (force-close tooling — see /windows/:id/close below; revert before launch).
+// DEV-ONLY (force-close / force-settle tooling — see below; revert before launch).
 import { closeWindow, createSupabaseRepo } from "../payouts.js";
 import { notifyWindowClose } from "../telegram.js";
+import { settleDaily, type DailyChallengeRow } from "../daily.js";
 
 /**
  * Owner payout admin (X-Admin-Key gated, separate from player JWT). Lists
@@ -227,6 +228,42 @@ export const adminPayoutsRoutes: FastifyPluginAsync = async (app) => {
       }
     },
   );
+
+  // ══════════════════════════════════════════════════════════════════════
+  // DEV-ONLY — FORCE-SETTLE THE CURRENT DAILY CHALLENGE NOW. TEMPORARY testing
+  // tooling; REVERT THIS COMMIT BEFORE LAUNCH. Settles the open daily on demand
+  // (so the 🏆 Telegram message → /paid → receipt can be tested without waiting
+  // for 00:00 UTC). Runs the SAME settleDaily() the cron does — no new logic; a
+  // payout only mints if today's track has a verified+finished run. GATED: inert
+  // (404) in production unless DEV_FORCE_CLOSE=1 is set in the env.
+  // ══════════════════════════════════════════════════════════════════════
+  app.post("/daily/settle-current", async (_req, reply) => {
+    if (process.env.DEV_FORCE_CLOSE !== "1") {
+      return reply.code(404).send({ error: "not found" });
+    }
+    const db = getDb();
+    const { data: daily, error } = await db
+      .from("cr_daily_challenges")
+      .select("id,track_id,challenge_date,starts_at,ends_at,status")
+      .eq("status", "open")
+      .order("challenge_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return reply.code(500).send({ error: "database error" });
+    if (!daily) return reply.code(404).send({ error: "no open daily challenge" });
+    try {
+      const { winner } = await settleDaily(db, daily as DailyChallengeRow, app.log);
+      return {
+        ok: true,
+        dailyId: (daily as DailyChallengeRow).id,
+        trackId: (daily as DailyChallengeRow).track_id,
+        winner: winner ? { playerId: winner.playerId, score: winner.serverScore, runId: winner.runId } : null,
+      };
+    } catch (err) {
+      app.log.error({ err }, "force-settle daily failed");
+      return reply.code(500).send({ error: "could not settle daily" });
+    }
+  });
 
   // ── Window history (totals + unpaid counts) ─────────────────────────────
   app.get("/windows", async (_req, reply) => {
