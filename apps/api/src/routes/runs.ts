@@ -304,7 +304,16 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
           flips: body.flips ?? 0,
           crashes: body.crashes ?? 0,
         };
-        await db.from("cr_runs").update(update).eq("id", runId);
+        const { error: updErr } = await db.from("cr_runs").update(update).eq("id", runId);
+        if (updErr) {
+          // Never swallow this: a rejected write leaves the run stuck 'pending'
+          // while the client was told its real status (e.g. a stale
+          // cr_runs_verify_status_check constraint — see sql/009).
+          req.log.error(
+            { runId, status: verifyStatus, updErr },
+            "run status write FAILED — run left pending; check cr_runs status CHECK constraint (sql/009)",
+          );
+        }
 
         // ── Ranks (only verified + finished earns a rank) ─────────────────
         let rankThisWindow: number | undefined;
