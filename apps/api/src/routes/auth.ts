@@ -1,180 +1,81 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FastifyPluginAsync } from "fastify";
 import {
-  buildLoginMessage,
-  generateNonce,
-  signToken,
-  validateUsername,
-  verifySignature,
-} from "../auth.js";
+  createSupabaseAccountRepo,
+  performLogin,
+  performSignup,
+  type LoginInput,
+  type SignupInput,
+} from "../accounts.js";
+import { signToken } from "../auth.js";
 import { getDb } from "../db.js";
 
-/** Nonce lifetime: short window between request and signature. */
-const NONCE_TTL_MS = 5 * 60 * 1000;
+/** Per-IP login throttle so one host can't spray PINs across many usernames. */
+const IP_MAX_ATTEMPTS = 20;
+const IP_WINDOW_MS = 15 * 60 * 1000;
+const ipAttempts = new Map<string, { count: number; resetAt: number }>();
 
-interface NonceBody {
-  walletAddress: string;
-}
-interface VerifyBody {
-  walletAddress: string;
-  signature: string;
-}
-interface RegisterBody {
-  walletAddress: string;
-  signature: string;
-  username: string;
+function ipThrottled(ip: string, now: number): boolean {
+  const entry = ipAttempts.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    ipAttempts.set(ip, { count: 1, resetAt: now + IP_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > IP_MAX_ATTEMPTS;
 }
 
-const walletSchema = {
+const signupSchema = {
   type: "object",
-  required: ["walletAddress"],
-  properties: { walletAddress: { type: "string", minLength: 32, maxLength: 64 } },
-} as const;
-
-const verifySchema = {
-  type: "object",
-  required: ["walletAddress", "signature"],
+  required: ["username", "pin", "walletAddress", "walletAddressConfirm"],
   properties: {
-    walletAddress: { type: "string", minLength: 32, maxLength: 64 },
-    signature: { type: "string", minLength: 64, maxLength: 128 },
+    username: { type: "string", minLength: 3, maxLength: 16 },
+    pin: { type: "string", pattern: "^\\d{4}$" },
+    walletAddress: { type: "string", minLength: 32, maxLength: 44 },
+    walletAddressConfirm: { type: "string", minLength: 32, maxLength: 44 },
   },
 } as const;
 
-const registerSchema = {
+const loginSchema = {
   type: "object",
-  required: ["walletAddress", "signature", "username"],
+  required: ["username", "pin"],
   properties: {
-    walletAddress: { type: "string", minLength: 32, maxLength: 64 },
-    signature: { type: "string", minLength: 64, maxLength: 128 },
     username: { type: "string", minLength: 3, maxLength: 16 },
+    pin: { type: "string", pattern: "^\\d{4}$" },
   },
 } as const;
 
 /**
- * Consume a single-use login nonce: look it up, reject if missing/expired,
- * reconstruct the exact signed message, verify the signature, and DELETE the
- * nonce. Returns true only on a fully valid signature.
+ * Username + 4-digit PIN + Solana payout address accounts. No wallet signing,
+ * no email. The wallet is claimed once and permanently immutable; the PIN is
+ * bcrypt-hashed and brute-force-locked (see accounts.ts).
  */
-async function consumeNonce(
-  db: SupabaseClient,
-  walletAddress: string,
-  signature: string,
-): Promise<boolean> {
-  const { data: row } = await db
-    .from("cr_auth_nonces")
-    .select("nonce, expires_at")
-    .eq("wallet_address", walletAddress)
-    .maybeSingle();
-  if (!row) return false;
-  if (new Date(row.expires_at as string).getTime() < Date.now()) {
-    await db.from("cr_auth_nonces").delete().eq("wallet_address", walletAddress);
-    return false;
-  }
-  const message = buildLoginMessage(walletAddress, row.nonce as string);
-  const ok = verifySignature(walletAddress, message, signature);
-  if (ok) {
-    // Single-use: a valid signature burns the nonce.
-    await db.from("cr_auth_nonces").delete().eq("wallet_address", walletAddress);
-  }
-  return ok;
-}
-
-/** Wallet-signature auth (tweetnacl verify → JWT). The wallet is the account. */
 export const authRoutes: FastifyPluginAsync = async (app) => {
-  // 1. Issue a one-time nonce + the human-readable message to sign.
-  app.post<{ Body: NonceBody }>("/nonce", { schema: { body: walletSchema } }, async (req) => {
-    const db = getDb();
-    const { walletAddress } = req.body;
-    const nonce = generateNonce();
-    const expiresAt = new Date(Date.now() + NONCE_TTL_MS).toISOString();
-    await db
-      .from("cr_auth_nonces")
-      .upsert(
-        { wallet_address: walletAddress, nonce, expires_at: expiresAt },
-        { onConflict: "wallet_address" },
-      );
-    return { message: buildLoginMessage(walletAddress, nonce) };
+  // 1. Create an account (binds username + PIN + wallet) and issue a JWT.
+  app.post<{ Body: SignupInput }>(
+    "/signup",
+    { schema: { body: signupSchema } },
+    async (req, reply) => {
+      const repo = createSupabaseAccountRepo(getDb());
+      const result = await performSignup(repo, req.body);
+      if (!result.ok) return reply.code(result.status).send({ error: result.error });
+      return {
+        token: signToken({ playerId: result.playerId, username: result.username }),
+        username: result.username,
+      };
+    },
+  );
+
+  // 2. Log in with username + PIN. Per-IP throttle + per-account lockout.
+  app.post<{ Body: LoginInput }>("/login", { schema: { body: loginSchema } }, async (req, reply) => {
+    if (ipThrottled(req.ip, Date.now())) {
+      return reply.code(429).send({ error: "too many login attempts — try again later" });
+    }
+    const repo = createSupabaseAccountRepo(getDb());
+    const result = await performLogin(repo, req.body);
+    if (!result.ok) return reply.code(result.status).send({ error: result.error });
+    return {
+      token: signToken({ playerId: result.playerId, username: result.username }),
+      username: result.username,
+    };
   });
-
-  // 2. Verify the signature. Existing player → JWT; new wallet → needsUsername.
-  app.post<{ Body: VerifyBody }>(
-    "/verify",
-    { schema: { body: verifySchema } },
-    async (req, reply) => {
-      const db = getDb();
-      const { walletAddress, signature } = req.body;
-      if (!(await consumeNonce(db, walletAddress, signature))) {
-        return reply.code(401).send({ error: "invalid or expired signature" });
-      }
-      const { data: player } = await db
-        .from("cr_players")
-        .select("id, username")
-        .eq("wallet_address", walletAddress)
-        .maybeSingle();
-      if (!player) {
-        // Signature is good but there's no account yet — gather a username next.
-        return { needsUsername: true };
-      }
-      await db
-        .from("cr_players")
-        .update({ last_login_at: new Date().toISOString() })
-        .eq("id", player.id);
-      return {
-        token: signToken({ playerId: player.id as string, wallet: walletAddress }),
-        username: player.username as string,
-      };
-    },
-  );
-
-  // 3. Register a new account (fresh signature required) and issue a JWT.
-  app.post<{ Body: RegisterBody }>(
-    "/register",
-    { schema: { body: registerSchema } },
-    async (req, reply) => {
-      const db = getDb();
-      const { walletAddress, signature, username } = req.body;
-      const valid = validateUsername(username);
-      if (!valid.ok) return reply.code(400).send({ error: valid.reason });
-      if (!(await consumeNonce(db, walletAddress, signature))) {
-        return reply.code(401).send({ error: "invalid or expired signature" });
-      }
-      // Guard against an existing account for this wallet (re-register attempt).
-      const { data: existing } = await db
-        .from("cr_players")
-        .select("id, username")
-        .eq("wallet_address", walletAddress)
-        .maybeSingle();
-      if (existing) {
-        return {
-          token: signToken({ playerId: existing.id as string, wallet: walletAddress }),
-          username: existing.username as string,
-        };
-      }
-      // Case-insensitive uniqueness.
-      const { data: taken } = await db
-        .from("cr_players")
-        .select("id")
-        .ilike("username", username)
-        .maybeSingle();
-      if (taken) return reply.code(409).send({ error: "username taken" });
-
-      const { data: created, error } = await db
-        .from("cr_players")
-        .insert({
-          wallet_address: walletAddress,
-          username,
-          last_login_at: new Date().toISOString(),
-        })
-        .select("id, username")
-        .single();
-      if (error || !created) {
-        // Unique-violation race or other failure.
-        return reply.code(409).send({ error: "username taken" });
-      }
-      return {
-        token: signToken({ playerId: created.id as string, wallet: walletAddress }),
-        username: created.username as string,
-      };
-    },
-  );
 };

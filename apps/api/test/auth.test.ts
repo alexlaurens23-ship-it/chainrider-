@@ -1,15 +1,5 @@
-import bs58 from "bs58";
-import nacl from "tweetnacl";
-import { describe, expect, it } from "vitest";
-import { buildLoginMessage, validateUsername, verifySignature } from "../src/auth.js";
-
-describe("buildLoginMessage", () => {
-  it("is the exact CHAINRIDER login template", () => {
-    expect(buildLoginMessage("WALLET", "NONCE")).toBe(
-      "CHAINRIDER login\nwallet: WALLET\nnonce: NONCE",
-    );
-  });
-});
+import { beforeAll, describe, expect, it } from "vitest";
+import { signToken, validateUsername, verifyToken } from "../src/auth.js";
 
 describe("validateUsername", () => {
   it("accepts 3–16 lowercase / digit / underscore", () => {
@@ -26,29 +16,17 @@ describe("validateUsername", () => {
   });
 });
 
-describe("verifySignature", () => {
-  // A real ed25519 keypair; the Solana address is the base58 public key.
-  const kp = nacl.sign.keyPair();
-  const wallet = bs58.encode(kp.publicKey);
-  const nonce = "test-nonce-123";
-  const message = buildLoginMessage(wallet, nonce);
-  const sig = bs58.encode(nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey));
-
-  it("accepts a genuine signature over the exact message", () => {
-    expect(verifySignature(wallet, message, sig)).toBe(true);
+describe("JWT round-trip", () => {
+  beforeAll(() => {
+    process.env.JWT_SECRET = "test-secret-for-vitest";
   });
 
-  it("rejects a signature over a different message (replay/forgery)", () => {
-    expect(verifySignature(wallet, buildLoginMessage(wallet, "other"), sig)).toBe(false);
+  it("signs and verifies {playerId, username}", () => {
+    const token = signToken({ playerId: "p-123", username: "rider_99" });
+    expect(verifyToken(token)).toEqual({ playerId: "p-123", username: "rider_99" });
   });
 
-  it("rejects a signature from a different wallet", () => {
-    const other = bs58.encode(nacl.sign.keyPair().publicKey);
-    expect(verifySignature(other, message, sig)).toBe(false);
-  });
-
-  it("rejects malformed base58 input without throwing", () => {
-    expect(verifySignature("not-base58!!", message, sig)).toBe(false);
-    expect(verifySignature(wallet, message, "garbage")).toBe(false);
+  it("rejects a garbage token", () => {
+    expect(() => verifyToken("not.a.jwt")).toThrow();
   });
 });

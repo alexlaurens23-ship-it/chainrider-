@@ -1,12 +1,11 @@
-// Wallet sign-in for CHAINRIDER. The wallet IS the account and the payout
-// address — no passwords, no email. We use the Phantom injected provider
-// (window.solana) directly: the app is vanilla TS with no React, so the heavier
-// @solana/wallet-adapter stack buys nothing — we only need connect + signMessage.
-// The private key never leaves the wallet; we send only the public address and a
-// detached ed25519 signature, which the server verifies (hard rule: client never
-// trusted). JWT is stored in localStorage and attached as Bearer by net.ts.
+// Account UI for CHAINRIDER: username + 4-digit PIN + a pasted Solana payout
+// address. No wallet extension, no message signing — users only ever paste a
+// PUBLIC address (never a private key). The JWT from login/signup is stored in
+// localStorage and attached as Bearer by net.ts. The wallet is bound once at
+// signup and is permanently immutable, so the signup UI makes the user confirm
+// it (clipboard-swap malware is a real risk for pasted crypto addresses).
 import bs58 from "bs58";
-import { ApiError, postNonce, postRegister, postVerify } from "./net";
+import { ApiError, postLogin, postSignup } from "./net";
 
 const TOKEN_KEY = "cr_jwt";
 const NAME_KEY = "cr_username";
@@ -26,91 +25,22 @@ function clearSession(): void {
   localStorage.removeItem(NAME_KEY);
 }
 
-// ── Phantom provider ─────────────────────────────────────────────────────────
+// ── Client-side pre-checks (server re-validates authoritatively) ─────────────
 
-interface PhantomProvider {
-  isPhantom?: boolean;
-  publicKey?: { toString(): string } | null;
-  connect(): Promise<{ publicKey: { toString(): string } }>;
-  disconnect(): Promise<void>;
-  signMessage(message: Uint8Array, display?: "utf8" | "hex"): Promise<{ signature: Uint8Array }>;
-}
-
-function getProvider(): PhantomProvider | null {
-  const sol = (window as unknown as { solana?: PhantomProvider }).solana;
-  return sol?.isPhantom ? sol : null;
-}
-
-async function signMessage(provider: PhantomProvider, message: string): Promise<string> {
-  const { signature } = await provider.signMessage(new TextEncoder().encode(message), "utf8");
-  return bs58.encode(signature);
-}
-
-// ── Flow ─────────────────────────────────────────────────────────────────────
-
-let busy = false;
-
-async function connectFlow(): Promise<void> {
-  if (busy) return;
-  const provider = getProvider();
-  if (!provider) {
-    window.open("https://phantom.app/", "_blank");
-    return;
-  }
-  busy = true;
-  render();
+function isValidWallet(addr: string): boolean {
+  if (addr.length < 32 || addr.length > 44) return false;
   try {
-    const { publicKey } = await provider.connect();
-    const address = publicKey.toString();
-    const { message } = await postNonce(address);
-    const signature = await signMessage(provider, message);
-    const verify = await postVerify(address, signature);
-    if (verify.needsUsername) {
-      openUsernameModal(provider, address);
-    } else {
-      setSession(verify.token, verify.username);
-    }
-  } catch (err) {
-    // User rejected the connect/sign, or the verify failed — stay logged out.
-    console.warn("wallet connect failed", err);
-  } finally {
-    busy = false;
-    render();
+    return bs58.decode(addr).length === 32;
+  } catch {
+    return false;
   }
 }
 
-async function registerFlow(
-  provider: PhantomProvider,
-  address: string,
-  username: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  // A fresh nonce + re-sign — /verify burned the previous one.
-  const { message } = await postNonce(address);
-  const signature = await signMessage(provider, message);
-  try {
-    const session = await postRegister(address, signature, username);
-    setSession(session.token, session.username);
-    return { ok: true };
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 409) {
-      return { ok: false, error: "That username is taken." };
-    }
-    if (err instanceof ApiError && err.status === 400) {
-      return { ok: false, error: "3–16 chars: a–z, 0–9, _" };
-    }
-    return { ok: false, error: "Could not register — try again." };
-  }
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
 }
 
-function disconnect(): void {
-  getProvider()
-    ?.disconnect()
-    .catch(() => undefined);
-  clearSession();
-  render();
-}
-
-// ── UI ───────────────────────────────────────────────────────────────────────
+// ── Persistent bar ───────────────────────────────────────────────────────────
 
 let bar: HTMLElement | null = null;
 
@@ -118,70 +48,199 @@ function render(): void {
   if (!bar) return;
   const name = getUsername();
   if (name) {
-    bar.innerHTML = `<span class="wb-name">@${name}</span><button class="wb-btn" id="wb-disconnect">Disconnect</button>`;
-    bar.querySelector<HTMLButtonElement>("#wb-disconnect")!.addEventListener("click", disconnect);
-  } else {
-    const label = busy ? "Connecting…" : "Connect Wallet";
-    bar.innerHTML = `<button class="wb-btn wb-connect" id="wb-connect" ${busy ? "disabled" : ""}>${label}</button>`;
-    bar.querySelector<HTMLButtonElement>("#wb-connect")!.addEventListener("click", () => {
-      void connectFlow();
+    bar.innerHTML = `<span class="wb-name">@${name}</span><button class="wb-btn" id="wb-logout">Log Out</button>`;
+    bar.querySelector<HTMLButtonElement>("#wb-logout")!.addEventListener("click", () => {
+      clearSession();
+      render();
     });
+  } else {
+    bar.innerHTML = `
+      <button class="wb-btn" id="wb-login">Log In</button>
+      <button class="wb-btn wb-connect" id="wb-signup">Sign Up</button>`;
+    bar.querySelector<HTMLButtonElement>("#wb-login")!.addEventListener("click", openLoginModal);
+    bar.querySelector<HTMLButtonElement>("#wb-signup")!.addEventListener("click", openSignupModal);
   }
 }
 
-function openUsernameModal(provider: PhantomProvider, address: string): void {
+function modalShell(inner: string): { overlay: HTMLElement; close: () => void } {
   const overlay = document.createElement("div");
   overlay.className = "modal";
-  overlay.innerHTML = `
-    <div class="modal-card">
-      <div class="modal-title">PICK A USERNAME</div>
-      <div class="modal-sub">This is your rider name on the leaderboards.</div>
-      <input class="modal-input" id="wb-username" maxlength="16" autocomplete="off"
-             placeholder="3–16: a–z 0–9 _" />
-      <div class="modal-error" id="wb-error"></div>
-      <div class="modal-buttons">
-        <button class="btn-secondary" id="wb-cancel">Cancel</button>
-        <button class="btn-primary" id="wb-create">Create</button>
-      </div>
-    </div>`;
+  overlay.innerHTML = `<div class="modal-card">${inner}</div>`;
   document.body.appendChild(overlay);
+  return { overlay, close: () => overlay.remove() };
+}
 
-  const input = overlay.querySelector<HTMLInputElement>("#wb-username")!;
-  const errorEl = overlay.querySelector<HTMLDivElement>("#wb-error")!;
-  const createBtn = overlay.querySelector<HTMLButtonElement>("#wb-create")!;
-  input.focus();
+// ── Login ────────────────────────────────────────────────────────────────────
 
-  const close = (): void => overlay.remove();
+function openLoginModal(): void {
+  const { overlay, close } = modalShell(`
+    <div class="modal-title">LOG IN</div>
+    <div class="modal-sub">Username + your 4-digit PIN.</div>
+    <input class="modal-input" id="lg-user" maxlength="16" autocomplete="off" placeholder="username" />
+    <input class="modal-input" id="lg-pin" inputmode="numeric" maxlength="4" type="password"
+           autocomplete="off" placeholder="PIN (4 digits)" style="margin-top:8px" />
+    <div class="modal-error" id="lg-error"></div>
+    <div class="modal-buttons">
+      <button class="btn-secondary" id="lg-cancel">Cancel</button>
+      <button class="btn-primary" id="lg-submit">Log In</button>
+    </div>`);
 
-  const submit = async (): Promise<void> => {
-    const username = input.value.trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,16}$/.test(username)) {
-      errorEl.textContent = "3–16 chars: a–z, 0–9, _";
+  const user = overlay.querySelector<HTMLInputElement>("#lg-user")!;
+  const pin = overlay.querySelector<HTMLInputElement>("#lg-pin")!;
+  const errorEl = overlay.querySelector<HTMLDivElement>("#lg-error")!;
+  const submit = overlay.querySelector<HTMLButtonElement>("#lg-submit")!;
+  user.focus();
+
+  const go = async (): Promise<void> => {
+    const username = user.value.trim().toLowerCase();
+    const pinVal = pin.value.trim();
+    if (!/^[a-z0-9_]{3,16}$/.test(username) || !/^\d{4}$/.test(pinVal)) {
+      errorEl.textContent = "Enter your username and 4-digit PIN.";
       return;
     }
-    createBtn.disabled = true;
-    createBtn.textContent = "Signing…";
-    const res = await registerFlow(provider, address, username);
-    if (res.ok) {
+    submit.disabled = true;
+    submit.textContent = "…";
+    try {
+      const res = await postLogin({ username, pin: pinVal });
+      setSession(res.token, res.username);
       close();
       render();
-    } else {
-      errorEl.textContent = res.error;
-      createBtn.disabled = false;
-      createBtn.textContent = "Create";
+    } catch (err) {
+      errorEl.textContent = errorText(err, "Login failed — try again.");
+      submit.disabled = false;
+      submit.textContent = "Log In";
     }
   };
 
-  createBtn.addEventListener("click", () => void submit());
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") void submit();
+  submit.addEventListener("click", () => void go());
+  pin.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") void go();
   });
-  overlay.querySelector<HTMLButtonElement>("#wb-cancel")!.addEventListener("click", close);
+  overlay.querySelector<HTMLButtonElement>("#lg-cancel")!.addEventListener("click", close);
+}
+
+// ── Signup (2 steps: form → review/confirm) ──────────────────────────────────
+
+function openSignupModal(): void {
+  const { overlay, close } = modalShell("");
+  const card = overlay.querySelector<HTMLDivElement>(".modal-card")!;
+
+  const renderForm = (prefill?: {
+    username: string;
+    pin: string;
+    wallet: string;
+    confirm: string;
+  }): void => {
+    card.innerHTML = `
+      <div class="modal-title">CREATE ACCOUNT</div>
+      <div class="modal-sub">Username, a 4-digit PIN, and your Solana payout wallet.</div>
+      <input class="modal-input" id="su-user" maxlength="16" autocomplete="off" placeholder="username (a–z 0–9 _)" />
+      <input class="modal-input" id="su-pin" inputmode="numeric" maxlength="4" type="password"
+             autocomplete="off" placeholder="PIN (4 digits)" style="margin-top:8px" />
+      <input class="modal-input" id="su-wallet" autocomplete="off" placeholder="Solana wallet address" style="margin-top:8px" />
+      <input class="modal-input" id="su-confirm" autocomplete="off" placeholder="confirm wallet address" style="margin-top:8px" />
+      <div class="modal-error" id="su-error"></div>
+      <div class="modal-buttons">
+        <button class="btn-secondary" id="su-cancel">Cancel</button>
+        <button class="btn-primary" id="su-next">Review →</button>
+      </div>`;
+    const user = card.querySelector<HTMLInputElement>("#su-user")!;
+    const pin = card.querySelector<HTMLInputElement>("#su-pin")!;
+    const wallet = card.querySelector<HTMLInputElement>("#su-wallet")!;
+    const confirm = card.querySelector<HTMLInputElement>("#su-confirm")!;
+    const errorEl = card.querySelector<HTMLDivElement>("#su-error")!;
+    if (prefill) {
+      user.value = prefill.username;
+      pin.value = prefill.pin;
+      wallet.value = prefill.wallet;
+      confirm.value = prefill.confirm;
+    }
+    user.focus();
+
+    card.querySelector<HTMLButtonElement>("#su-cancel")!.addEventListener("click", close);
+    card.querySelector<HTMLButtonElement>("#su-next")!.addEventListener("click", () => {
+      const username = user.value.trim().toLowerCase();
+      const pinVal = pin.value.trim();
+      const walletVal = wallet.value.trim();
+      const confirmVal = confirm.value.trim();
+      if (!/^[a-z0-9_]{3,16}$/.test(username)) {
+        errorEl.textContent = "Username: 3–16 chars of a–z, 0–9, _";
+        return;
+      }
+      if (!/^\d{4}$/.test(pinVal)) {
+        errorEl.textContent = "PIN must be exactly 4 digits.";
+        return;
+      }
+      if (walletVal !== confirmVal) {
+        errorEl.textContent = "Wallet addresses don't match.";
+        return;
+      }
+      if (!isValidWallet(walletVal)) {
+        errorEl.textContent = "That doesn't look like a Solana wallet address.";
+        return;
+      }
+      renderReview({ username, pin: pinVal, wallet: walletVal, confirm: confirmVal });
+    });
+  };
+
+  const renderReview = (data: {
+    username: string;
+    pin: string;
+    wallet: string;
+    confirm: string;
+  }): void => {
+    card.innerHTML = `
+      <div class="modal-title">CONFIRM YOUR WALLET</div>
+      <div class="modal-sub">Payout address for <b>@${data.username}</b>. This is permanent.</div>
+      <div class="wallet-review">${data.wallet}</div>
+      <div class="modal-warning">
+        Paste your wallet address, then check the <b>first and last 4 characters</b> match your
+        real wallet — clipboard malware can swap addresses. <b>This is permanent and can never be changed.</b>
+      </div>
+      <label class="modal-check">
+        <input type="checkbox" id="su-ack" /> I've checked my wallet address
+      </label>
+      <div class="modal-error" id="su-error"></div>
+      <div class="modal-buttons">
+        <button class="btn-secondary" id="su-back">← Back</button>
+        <button class="btn-primary" id="su-create" disabled>Create account</button>
+      </div>`;
+    const ack = card.querySelector<HTMLInputElement>("#su-ack")!;
+    const create = card.querySelector<HTMLButtonElement>("#su-create")!;
+    const errorEl = card.querySelector<HTMLDivElement>("#su-error")!;
+
+    ack.addEventListener("change", () => {
+      create.disabled = !ack.checked;
+    });
+    card.querySelector<HTMLButtonElement>("#su-back")!.addEventListener("click", () => renderForm(data));
+    create.addEventListener("click", async () => {
+      if (!ack.checked) return;
+      create.disabled = true;
+      create.textContent = "Creating…";
+      try {
+        const res = await postSignup({
+          username: data.username,
+          pin: data.pin,
+          walletAddress: data.wallet,
+          walletAddressConfirm: data.confirm,
+        });
+        setSession(res.token, res.username);
+        close();
+        render();
+      } catch (err) {
+        errorEl.textContent = errorText(err, "Could not create the account.");
+        create.disabled = false;
+        create.textContent = "Create account";
+      }
+    });
+  };
+
+  renderForm();
 }
 
 /**
- * Mount the persistent Connect-Wallet bar. Appended to <body> (NOT inside #app),
- * so it survives the router's per-screen replaceChildren(). Call once at boot.
+ * Mount the persistent account bar. Appended to <body> (NOT inside #app) so it
+ * survives the router's per-screen replaceChildren(). Call once at boot.
  */
 export function mountWalletButton(): void {
   if (bar) return;

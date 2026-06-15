@@ -22,7 +22,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (token) headers.set("authorization", `Bearer ${token}`);
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
-    throw new ApiError(response.status, `${path} failed with status ${response.status}`);
+    // Surface the server's { error } message (e.g. lockout text) when present.
+    let message = `${path} failed with status ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      /* non-JSON body — keep the default message */
+    }
+    throw new ApiError(response.status, message);
   }
   return (await response.json()) as T;
 }
@@ -141,15 +149,18 @@ export interface SubmitRunResult {
   rankAllTime?: number;
 }
 
-// ── Auth (wallet sign-in) ────────────────────────────────────────────────────
+// ── Auth (username + PIN + wallet) ───────────────────────────────────────────
 
-export interface NonceResponse {
-  message: string;
+export interface SignupPayload {
+  username: string;
+  pin: string;
+  walletAddress: string;
+  walletAddressConfirm: string;
 }
-/** /verify returns either a session or a needs-username signal. */
-export type VerifyResponse =
-  | { token: string; username: string; needsUsername?: undefined }
-  | { needsUsername: true; token?: undefined; username?: undefined };
+export interface LoginPayload {
+  username: string;
+  pin: string;
+}
 export interface SessionResponse {
   token: string;
   username: string;
@@ -205,18 +216,10 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export function postNonce(walletAddress: string): Promise<NonceResponse> {
-  return postJson<NonceResponse>("/auth/nonce", { walletAddress });
+export function postSignup(payload: SignupPayload): Promise<SessionResponse> {
+  return postJson<SessionResponse>("/auth/signup", payload);
 }
 
-export function postVerify(walletAddress: string, signature: string): Promise<VerifyResponse> {
-  return postJson<VerifyResponse>("/auth/verify", { walletAddress, signature });
-}
-
-export function postRegister(
-  walletAddress: string,
-  signature: string,
-  username: string,
-): Promise<SessionResponse> {
-  return postJson<SessionResponse>("/auth/register", { walletAddress, signature, username });
+export function postLogin(payload: LoginPayload): Promise<SessionResponse> {
+  return postJson<SessionResponse>("/auth/login", payload);
 }
