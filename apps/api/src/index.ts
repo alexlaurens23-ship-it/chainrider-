@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { assertJwtSecretStrength } from "./auth.js";
+import { startTelegramBot } from "./telegram.js";
 import { startWindowEngine } from "./windows.js";
 import { adminRoutes } from "./routes/admin.js";
 import { adminPayoutsRoutes } from "./routes/adminPayouts.js";
@@ -38,6 +39,10 @@ async function main(): Promise<void> {
 
   // Open/close the 30-min UTC payout windows on a cron. SINGLE INSTANCE ONLY.
   startWindowEngine(app);
+
+  // Telegram payout control channel (notify on close + /paid reply). Disabled if
+  // env unset; never holds keys or sends SOL. SINGLE INSTANCE ONLY.
+  startTelegramBot(app);
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
 }

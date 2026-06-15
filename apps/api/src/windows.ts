@@ -3,6 +3,7 @@ import cron from "node-cron";
 import type { FastifyInstance } from "fastify";
 import { closeWindow, createSupabaseRepo } from "./payouts.js";
 import { getDb } from "./db.js";
+import { notifyWindowClose } from "./telegram.js";
 
 /**
  * Window engine — opens/closes the 30-minute UTC-aligned payout slots and calls
@@ -78,7 +79,7 @@ export async function closeElapsedWindows(
   const nowIso = new Date().toISOString();
   const { data, error } = await db
     .from("cr_payout_windows")
-    .select("id")
+    .select("id, starts_at")
     .eq("status", "open")
     .lte("ends_at", nowIso);
   if (error) {
@@ -94,6 +95,15 @@ export async function closeElapsedWindows(
         { windowId, inserted: result.inserted, skippedAlreadyPaid: result.skippedAlreadyPaid },
         "window-engine: closed window",
       );
+      // Additive side-effect: DM the owner the payouts to send (silent if none).
+      // Wrapped so a Telegram failure can never break the close/settle path.
+      if (result.inserted > 0) {
+        try {
+          await notifyWindowClose(db, windowId, (row.starts_at as string) ?? null, log);
+        } catch (err) {
+          log.error({ err, windowId }, "window-engine: payout notify failed");
+        }
+      }
     } catch (err) {
       log.error({ err, windowId }, "window-engine: closeWindow failed");
     }

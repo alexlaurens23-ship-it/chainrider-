@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getDb } from "../db.js";
+import { markPayoutPaid } from "../payoutOps.js";
 
 /**
  * Owner payout admin (X-Admin-Key gated, separate from player JWT). Lists
@@ -81,13 +82,13 @@ export const adminPayoutsRoutes: FastifyPluginAsync = async (app) => {
     },
     async (req, reply) => {
       const db = getDb();
-      const { error } = await db
-        .from("cr_payouts")
-        .update({ status: "paid", tx_sig: req.body.txSig, paid_at: new Date().toISOString() })
-        .eq("id", Number(req.params.id))
-        .eq("status", "pending");
-      if (error) return reply.code(500).send({ error: "could not record payment" });
-      return { ok: true };
+      // Shared with the Telegram bot (payoutOps.markPayoutPaid) — one source of truth.
+      const r = await markPayoutPaid(db, Number(req.params.id), req.body.txSig);
+      if (r.status === "paid") return { ok: true };
+      if (r.status === "bad_sig") return reply.code(400).send({ error: "invalid tx signature" });
+      if (r.status === "not_found") return reply.code(404).send({ error: "payout not found" });
+      if (r.status === "not_pending") return reply.code(409).send({ error: `payout is ${r.current}` });
+      return reply.code(500).send({ error: "could not record payment" });
     },
   );
 
