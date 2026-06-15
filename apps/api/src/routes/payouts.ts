@@ -5,6 +5,7 @@ interface PaidRow {
   amount_sol: number;
   tx_sig: string | null;
   paid_at: string | null;
+  kind: string | null;
   cr_players: { username: string } | null;
   cr_tracks: { tier: string; mode: string; cr_maps: { symbol: string; period: string } | null } | null;
 }
@@ -19,7 +20,7 @@ export const payoutsRoutes: FastifyPluginAsync = async (app) => {
     const { data, error } = await db
       .from("cr_payouts")
       .select(
-        "amount_sol,tx_sig,paid_at,cr_players(username),cr_tracks(tier,mode,cr_maps(symbol,period))",
+        "amount_sol,tx_sig,paid_at,kind,cr_players(username),cr_tracks(tier,mode,cr_maps(symbol,period))",
       )
       .eq("status", "paid")
       .order("paid_at", { ascending: false })
@@ -39,6 +40,7 @@ export const payoutsRoutes: FastifyPluginAsync = async (app) => {
         username: r.cr_players?.username ?? "—",
         amountSol: Number(r.amount_sol),
         txSig: r.tx_sig,
+        kind: r.kind ?? "window",
       };
     });
   });

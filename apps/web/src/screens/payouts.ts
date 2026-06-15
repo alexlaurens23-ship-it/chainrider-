@@ -48,9 +48,10 @@ function renderReceipts(el: HTMLElement, rows: ReceiptRow[]): void {
       const sig = r.txSig
         ? `<a href="https://solscan.io/tx/${encodeURIComponent(r.txSig)}" target="_blank" rel="noopener">${shortSig(r.txSig)}</a>`
         : "—";
+      const daily = r.kind === "daily" ? ` <span class="daily-tag">DAILY</span>` : "";
       return `<tr>
         <td>${fmtTime(r.paidAt)}</td>
-        <td>${r.label}</td>
+        <td>${r.label}${daily}</td>
         <td>@${r.username}</td>
         <td class="amt">${formatSol(r.amountSol)} SOL</td>
         <td>${sig}</td>

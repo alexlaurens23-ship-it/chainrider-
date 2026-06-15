@@ -85,6 +85,26 @@ export function buildPendingList(payouts: readonly EnrichedPayout[]): string {
   ].join("\n");
 }
 
+export interface DailyWinnerInfo {
+  payoutId: number;
+  amountSol: number;
+  wallet: string;
+  label: string;
+  username: string;
+  score: number;
+}
+
+/** The daily-challenge winner announcement, copy-paste ready (same /paid flow). */
+export function buildDailyWinnerNotification(w: DailyWinnerInfo): string {
+  return [
+    `🏆 DAILY CHALLENGE WINNER`,
+    `${fmtSol(w.amountSol)} SOL → ${w.wallet}`,
+    `(${w.label} · @${w.username} · score ${w.score})`,
+    "",
+    `Reply: /paid ${w.payoutId} <txSig> once sent.`,
+  ].join("\n");
+}
+
 export interface PaidCommand {
   payoutId: number;
   txSig: string;
@@ -144,6 +164,44 @@ export async function notifyWindowClose(
   }
   const msg = buildPayoutNotification(windowId, startsAt, payouts);
   if (!msg) return; // zero payouts → silent
+  await sendTelegramMessage(msg, log);
+}
+
+/** Announce a settled daily challenge's winner (the pending daily cr_payouts row). */
+export async function notifyDailyWinner(
+  db: SupabaseClient,
+  dailyChallengeId: number,
+  log?: FastifyInstance["log"],
+): Promise<void> {
+  if (!tgConfigured()) return;
+  const { data: payout } = await db
+    .from("cr_payouts")
+    .select("id,amount_sol,cr_players(username,wallet_address),cr_tracks(tier,mode,cr_maps(symbol,period))")
+    .eq("daily_challenge_id", dailyChallengeId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (!payout) return;
+  const { data: daily } = await db
+    .from("cr_daily_challenges")
+    .select("winner_score")
+    .eq("id", dailyChallengeId)
+    .maybeSingle();
+  const row = payout as unknown as {
+    id: number;
+    amount_sol: number;
+    cr_players: { username: string; wallet_address: string } | null;
+    cr_tracks: { tier: string; mode: string; cr_maps: { symbol: string; period: string } | null } | null;
+  };
+  const t = row.cr_tracks;
+  const label = t ? `${t.cr_maps?.symbol ?? "?"} ${t.cr_maps?.period ?? "?"} ${t.tier} · ${t.mode}` : "track";
+  const msg = buildDailyWinnerNotification({
+    payoutId: row.id,
+    amountSol: Number(row.amount_sol),
+    wallet: row.cr_players?.wallet_address ?? "—",
+    username: row.cr_players?.username ?? "—",
+    label,
+    score: Number((daily?.winner_score as number | null) ?? 0),
+  });
   await sendTelegramMessage(msg, log);
 }
 

@@ -2,6 +2,7 @@ import bs58 from "bs58";
 import { describe, expect, it } from "vitest";
 import { isValidSolanaSig, markPayoutPaid } from "../src/payoutOps.js";
 import {
+  buildDailyWinnerNotification,
   buildPayoutNotification,
   buildPendingList,
   handlePaid,
@@ -33,6 +34,23 @@ describe("buildPayoutNotification", () => {
     expect(msg).toContain("#2  0.05 SOL → 5Xy9qZ2bN1Fde8tWcVuMabcdefghijkmnopqrstuvwx  (SOL 3M DEGEN · raw · @rider2)");
     expect(msg).toContain("/paid <id> <txSig>");
     expect(msg).toContain("ids: 1, 2");
+  });
+});
+
+describe("buildDailyWinnerNotification", () => {
+  it("announces the daily winner with full wallet, score, and a /paid reference", () => {
+    const msg = buildDailyWinnerNotification({
+      payoutId: 7,
+      amountSol: 0.5,
+      wallet: "DqW8mpYYp4h7UBqgeEETqgfKPWqGcTbkuHgUyCukL73d",
+      label: "POPCAT 3M SAVAGE · raw",
+      username: "axle",
+      score: 8421,
+    });
+    expect(msg).toContain("DAILY CHALLENGE WINNER");
+    expect(msg).toContain("0.5 SOL → DqW8mpYYp4h7UBqgeEETqgfKPWqGcTbkuHgUyCukL73d");
+    expect(msg).toContain("(POPCAT 3M SAVAGE · raw · @axle · score 8421)");
+    expect(msg).toContain("/paid 7 <txSig>");
   });
 });
 

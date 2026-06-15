@@ -1,8 +1,10 @@
 import {
+  getDaily,
   getMapsCached,
   getPayoutBoard,
   getStats,
   getTrackCached,
+  type DailyResponse,
   type MapEntry,
   type PayoutBoard,
   type StatsResponse,
@@ -11,8 +13,16 @@ import type { Screen } from "../router";
 import { formatCountdown, formatScore, formatSol, tierColor } from "../ui/format";
 import { drawSparkline } from "../ui/sparkline";
 
+/** Ms until the next 00:00 UTC (daily challenge reset). */
+function msToNextUtcMidnight(): number {
+  const now = new Date();
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
+  return next - now.getTime();
+}
+
 export function createHomeScreen(): Screen {
   let countdownTimer = 0;
+  let dailyTimer = 0;
 
   return {
     mount(root) {
@@ -38,6 +48,11 @@ export function createHomeScreen(): Screen {
         </div>
         <div id="payout-board"><div class="empty-state">Loading payout board…</div></div>
         <div class="board-foot"><a href="#/payouts">see who we've paid →</a></div>
+        <div class="board-head">
+          <div class="section-title">DAILY CHALLENGE</div>
+          <div class="countdown"><span>RESETS IN</span> <span class="cd-time" id="daily-cd">--:--:--</span></div>
+        </div>
+        <div id="daily"><div class="empty-state">Loading today's challenge…</div></div>
       `;
       root.appendChild(page);
 
@@ -46,6 +61,8 @@ export function createHomeScreen(): Screen {
       const solEl = page.querySelector<HTMLDivElement>("#sol")!;
       const cdEl = page.querySelector<HTMLSpanElement>("#cd")!;
       const boardEl = page.querySelector<HTMLDivElement>("#payout-board")!;
+      const dailyEl = page.querySelector<HTMLDivElement>("#daily")!;
+      const dailyCdEl = page.querySelector<HTMLSpanElement>("#daily-cd")!;
 
       // Countdown to the window's real ends_at (falls back to UTC-modulo).
       let endsAtMs = Math.ceil(Date.now() / 1_800_000) * 1_800_000;
@@ -80,10 +97,24 @@ export function createHomeScreen(): Screen {
         .catch(() => {
           grid.innerHTML = `<div class="empty-state">Could not load tracks. Is the API running?</div>`;
         });
+
+      // Daily challenge countdown ticks to the next 00:00 UTC.
+      function tickDaily(): void {
+        dailyCdEl.textContent = formatCountdown(msToNextUtcMidnight());
+      }
+      tickDaily();
+      dailyTimer = window.setInterval(tickDaily, 1000);
+
+      getDaily()
+        .then((daily) => renderDaily(dailyEl, daily))
+        .catch(() => {
+          dailyEl.innerHTML = `<div class="empty-state">Could not load today's challenge.</div>`;
+        });
     },
 
     unmount() {
       window.clearInterval(countdownTimer);
+      window.clearInterval(dailyTimer);
     },
   };
 }
@@ -109,6 +140,42 @@ function renderPayoutBoard(el: HTMLElement, board: PayoutBoard): void {
     })
     .join("");
   el.innerHTML = `<div class="payout-board">${rows}</div>`;
+}
+
+const DAILY_ACCENT = "#ffd34e"; // gold — the daily challenge
+
+function renderDaily(el: HTMLElement, daily: DailyResponse): void {
+  if (daily.trackId == null) {
+    el.innerHTML = `<div class="empty-state">No challenge open yet — check back at 00:00 UTC.</div>`;
+    return;
+  }
+  const top5 =
+    daily.top5.length === 0
+      ? `<div class="empty-state">Be the first to set a time on today's track.</div>`
+      : `<div class="payout-board">${daily.top5
+          .map(
+            (e) => `<div class="pb-row">
+              <span class="pb-rank">#${e.rank}</span>
+              <span class="pb-label">@${e.username}</span>
+              <span class="pb-leadwrap">${formatScore(e.score)}</span>
+            </div>`,
+          )
+          .join("")}</div>`;
+  el.innerHTML = `
+    <div class="daily-card">
+      <div class="daily-top">
+        <div>
+          <div class="daily-label">${daily.label ?? "today's track"}</div>
+          <div class="daily-prize">${formatSol(daily.prizeSol)} SOL · winner takes all</div>
+        </div>
+        <canvas class="spark daily-spark"></canvas>
+      </div>
+      <a class="btn-primary daily-ride" href="#/ride/${daily.trackId}">RIDE TODAY'S CHALLENGE</a>
+      <div class="daily-board-title">TOP 5 TODAY</div>
+      ${top5}
+    </div>`;
+  const canvas = el.querySelector<HTMLCanvasElement>(".daily-spark");
+  if (canvas && daily.points.length > 0) drawSparkline(canvas, daily.points, DAILY_ACCENT);
 }
 
 const SPARK_ACCENT = "#00e5ff"; // brand cyan

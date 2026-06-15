@@ -259,9 +259,25 @@ export interface ReceiptRow {
   username: string;
   amountSol: number;
   txSig: string | null;
+  kind: string;
 }
 export function getPaidReceipts(): Promise<ReceiptRow[]> {
   return apiFetch<ReceiptRow[]>("/payouts/paid");
+}
+
+// ── Daily challenge (P7.6) ───────────────────────────────────────────────────
+
+export interface DailyResponse {
+  date: string | null;
+  trackId: number | null;
+  label: string | null;
+  points: [number, number][];
+  prizeSol: number;
+  endsAt: string | null;
+  top5: GlobalEntry[];
+}
+export function getDaily(): Promise<DailyResponse> {
+  return apiFetch<DailyResponse>("/daily");
 }
 
 export interface ReplayData {
