@@ -1,136 +1,142 @@
 import { DEFAULT_TUNE, INPUT, simulateReplay } from "@chainrider/physics";
 import type { FinalResult, InputLogEntry, TrackPoint } from "@chainrider/physics";
 import { describe, expect, it } from "vitest";
-import { eligibleForRank, verifyRun, type ClientClaim } from "../src/runVerify.js";
+import {
+  eligibleForRank,
+  isWellFormedLog,
+  maxReasonableScore,
+  verifyRun,
+} from "../src/runVerify.js";
 
 /** Short flat track — the bike throttles straight to the finish. */
 const FLAT: TrackPoint[] = [
   [0, 0],
   [120, 0],
 ];
-/** Long flat track (~1 vertex/m) to time a realistically large replay. */
-const LONG_FLAT: TrackPoint[] = Array.from({ length: 1255 }, (_, i) => [i, 0] as TrackPoint);
-
-/** Hold throttle from tick 0. */
+/** Hold throttle from tick 0 → finishes the flat track. */
 const THROTTLE_LOG: InputLogEntry[] = [[0, INPUT.THROTTLE]];
-/** Test replay cap: enough to finish a short flat track quickly. */
-const TEST_MAX_TICKS = 6000;
 
-/** A known-good finishing run, recorded by the same engine the server uses. */
-function record(points: TrackPoint[], log: InputLogEntry[], maxTicks: number): FinalResult {
-  return simulateReplay(points, DEFAULT_TUNE, log, maxTicks);
+/** A generous ceiling for the flat track so legit runs are never flagged. */
+const FLAT_CEILING = maxReasonableScore({ parTimeMs: 30000, worldLength: 170 });
+
+/** Record the canonical finishing run (the server is the source of truth). */
+function record(): { result: FinalResult; ticks: number } {
+  const result = simulateReplay(FLAT, DEFAULT_TUNE, THROTTLE_LOG, 72000);
+  return { result, ticks: result.ticks };
 }
 
-function claimFrom(r: FinalResult): ClientClaim {
-  return { score: r.score, flips: r.flips, crashes: r.crashes, finished: r.finished, timeMs: r.timeMs };
-}
+describe("verifyRun — authoritative-server model", () => {
+  const good = record();
 
-describe("verifyRun — anti-cheat", () => {
-  const good = record(FLAT, THROTTLE_LOG, TEST_MAX_TICKS);
-
-  it("(setup) the recorded run actually finishes", () => {
-    expect(good.finished).toBe(true);
-    expect(good.score).toBeGreaterThan(0);
+  it("(setup) the recorded run finishes", () => {
+    expect(good.result.finished).toBe(true);
+    expect(good.result.score).toBeGreaterThan(0);
   });
 
-  it("(a) a faithful client claim verifies, server score is authoritative", () => {
+  it("(a) a well-formed finishing log verifies at the SERVER's score", () => {
     const res = verifyRun({
       points: FLAT,
       parTimeMs: undefined,
       inputLog: THROTTLE_LOG,
-      client: claimFrom(good),
-      maxTicks: TEST_MAX_TICKS,
+      submittedTicks: good.ticks,
+      maxScore: FLAT_CEILING,
     });
     expect(res.verifyStatus).toBe("verified");
-    expect(res.server?.score).toBe(good.score);
+    expect(res.server?.score).toBe(good.result.score);
+    expect(res.server?.finished).toBe(true);
   });
 
-  it("(b) the SAME log with clientScore inflated +5000 never verifies", () => {
-    const res = verifyRun({
-      points: FLAT,
-      parTimeMs: undefined,
-      inputLog: THROTTLE_LOG,
-      client: { ...claimFrom(good), score: good.score + 5000 },
-      maxTicks: TEST_MAX_TICKS,
-    });
-    expect(res.verifyStatus).not.toBe("verified");
-    expect(["flagged", "failed"]).toContain(res.verifyStatus);
+  it("(b) the client's claimed score is NOT an input — the result is client-independent", () => {
+    // There is no client-score parameter anymore. The same log always yields the
+    // same verified server score, no matter what the client claimed.
+    const a = verifyRun({ points: FLAT, parTimeMs: undefined, inputLog: THROTTLE_LOG, submittedTicks: good.ticks, maxScore: FLAT_CEILING });
+    const b = verifyRun({ points: FLAT, parTimeMs: undefined, inputLog: THROTTLE_LOG, submittedTicks: good.ticks, maxScore: FLAT_CEILING });
+    expect(a.verifyStatus).toBe("verified");
+    expect(a.server?.score).toBe(b.server?.score);
+    expect(a.server?.score).toBe(good.result.score);
   });
 
-  it("(c) a tampered inputLog yields a server score different from the claimed one", () => {
-    // Claim the good finishing score, but submit a genuinely different ride
-    // (throttle then brake → never reaches the finish). The re-simulation
-    // diverges from the claim, so the lie is caught: you can't submit log A
-    // and claim run B's score.
-    const tampered: InputLogEntry[] = [
-      [0, INPUT.THROTTLE],
-      [40, INPUT.BRAKE],
-    ];
-    const res = verifyRun({
-      points: FLAT,
-      parTimeMs: undefined,
-      inputLog: tampered,
-      client: claimFrom(good), // claims the untampered finishing result
-      maxTicks: 1500,
-    });
-    expect(res.server).not.toBeNull();
-    expect(res.server?.score).not.toBe(good.score);
-    expect(res.verifyStatus).not.toBe("verified");
-  });
-
-  it("(d) a DNF never earns a rank", () => {
-    // Throttle briefly then stop: never reaches the finish within the cap.
-    const dnfLog: InputLogEntry[] = [
-      [0, INPUT.THROTTLE],
-      [30, 0],
-    ];
-    const res = verifyRun({
-      points: FLAT,
-      parTimeMs: undefined,
-      inputLog: dnfLog,
-      client: { score: 0, flips: 0, crashes: 0, finished: false, timeMs: 0 },
-      maxTicks: 1200,
-    });
-    expect(res.server?.finished).toBe(false);
-    expect(eligibleForRank("verified", false)).toBe(false);
-    expect(eligibleForRank("verified", res.server?.finished ?? false)).toBe(false);
-  });
-
-  it("eligibleForRank gates correctly", () => {
-    expect(eligibleForRank("verified", true)).toBe(true);
-    expect(eligibleForRank("flagged", true)).toBe(false);
-    expect(eligibleForRank("failed", true)).toBe(false);
-    expect(eligibleForRank("verified", false)).toBe(false);
-  });
-
-  it("a malformed input log fails (not throws)", () => {
-    // Non-increasing ticks make simulateReplay throw → graceful 'failed'.
-    const bad: InputLogEntry[] = [
+  it("(c) a malformed inputLog → failed (server null), no throw", () => {
+    const nonIncreasing: InputLogEntry[] = [
       [10, INPUT.THROTTLE],
       [5, 0],
     ];
     const res = verifyRun({
       points: FLAT,
       parTimeMs: undefined,
-      inputLog: bad,
-      client: { score: 1, flips: 0, crashes: 0, finished: false, timeMs: 0 },
-      maxTicks: TEST_MAX_TICKS,
+      inputLog: nonIncreasing,
+      submittedTicks: good.ticks,
+      maxScore: FLAT_CEILING,
     });
     expect(res.verifyStatus).toBe("failed");
     expect(res.server).toBeNull();
   });
 
-  it("a large (~1255-pt, ~minutes) replay verifies in well under 1 s", () => {
-    const big = record(LONG_FLAT, THROTTLE_LOG, 72000);
-    expect(big.finished).toBe(true);
+  it("(d) a DNF log (stops before the flag) → failed, not verified", () => {
+    // Throttle briefly then idle; the bike never reaches the finish in `cap` ticks.
+    const dnf: InputLogEntry[] = [
+      [0, INPUT.THROTTLE],
+      [30, 0],
+    ];
     const res = verifyRun({
-      points: LONG_FLAT,
+      points: FLAT,
+      parTimeMs: undefined,
+      inputLog: dnf,
+      submittedTicks: 1200,
+      maxScore: FLAT_CEILING,
+    });
+    expect(res.verifyStatus).toBe("failed");
+    expect(res.server?.finished).toBe(false);
+    expect(eligibleForRank(res.verifyStatus, res.server?.finished ?? false)).toBe(false);
+  });
+
+  it("(e) a finishing run whose score exceeds the ceiling → flagged (not verified)", () => {
+    const res = verifyRun({
+      points: FLAT,
       parTimeMs: undefined,
       inputLog: THROTTLE_LOG,
-      client: claimFrom(big),
-      // default cap (72000) — but it finishes well before
+      submittedTicks: good.ticks,
+      maxScore: 1, // absurdly tight ceiling forces the flag
     });
-    expect(res.verifyStatus).toBe("verified");
-    expect(res.durationMs).toBeLessThan(1000);
+    expect(res.verifyStatus).toBe("flagged");
+    expect(res.server?.finished).toBe(true); // still a real finishing run, just held
+  });
+
+  it("eligibleForRank gates on verified + finished", () => {
+    expect(eligibleForRank("verified", true)).toBe(true);
+    expect(eligibleForRank("verified", false)).toBe(false);
+    expect(eligibleForRank("flagged", true)).toBe(false);
+    expect(eligibleForRank("failed", true)).toBe(false);
+  });
+});
+
+describe("isWellFormedLog", () => {
+  it("accepts a clean strictly-increasing change-only log within the run", () => {
+    expect(isWellFormedLog([[0, 1], [60, 5], [120, 0]], 200)).toBe(true);
+    expect(isWellFormedLog([], 200)).toBe(true);
+  });
+  it("rejects bad tick counts, non-monotonic ticks, bad entries, and last≥ticks", () => {
+    expect(isWellFormedLog([[0, 1]], 0)).toBe(false); // ticks must be > 0
+    expect(isWellFormedLog([[0, 1]], 99999999)).toBe(false); // > MAX_RIDE_TICKS
+    expect(isWellFormedLog([[10, 1], [5, 0]], 200)).toBe(false); // non-increasing
+    expect(isWellFormedLog([[0, 1], [0, 2]], 200)).toBe(false); // not strictly increasing
+    expect(isWellFormedLog([[0, -1]], 200)).toBe(false); // negative mask
+    expect(isWellFormedLog([[0, 99999]], 200)).toBe(false); // mask out of range
+    expect(isWellFormedLog([[0, 1.5]], 200)).toBe(false); // non-integer
+    expect(isWellFormedLog([[250, 1]], 200)).toBe(false); // last tick >= submittedTicks
+    expect(isWellFormedLog("nope", 200)).toBe(false);
+  });
+});
+
+describe("maxReasonableScore", () => {
+  it("is generous — far above a real finishing run's score", () => {
+    const { result } = record();
+    const ceiling = maxReasonableScore({ parTimeMs: 30000, worldLength: 170 });
+    expect(ceiling).toBeGreaterThan(result.score * 10);
+  });
+  it("grows with par time and shrinks with length (monotone-ish)", () => {
+    const base = maxReasonableScore({ parTimeMs: 90000, worldLength: 1000 });
+    expect(maxReasonableScore({ parTimeMs: 180000, worldLength: 1000 })).toBeGreaterThan(base);
+    expect(maxReasonableScore({ parTimeMs: 90000, worldLength: 3000 })).toBeLessThan(base);
   });
 });

@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FastifyPluginAsync } from "fastify";
 import { requireAuth } from "../auth.js";
 import { getDb } from "../db.js";
-import { eligibleForRank, verifyRun } from "../runVerify.js";
+import { MAX_RIDE_TICKS, eligibleForRank, maxReasonableScore, verifyRun } from "../runVerify.js";
 import { ensureOpenWindow } from "../windows.js";
 
 interface SubmitBody {
@@ -194,6 +194,10 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       if (body.inputLog.length > MAX_INPUT_LOG) {
         return reply.code(400).send({ error: "input log too long" });
       }
+      // The replay runs EXACTLY body.ticks steps (Bug A) — validate it's sane first.
+      if (!Number.isInteger(body.ticks) || body.ticks <= 0 || body.ticks > MAX_RIDE_TICKS) {
+        return reply.code(400).send({ error: "invalid tick count" });
+      }
       const now = Date.now();
       const last = lastSubmitMs.get(player.playerId) ?? 0;
       if (now - last < RATE_LIMIT_MS) {
@@ -209,11 +213,16 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       // ── Load the FROZEN track; only ACTIVE versions accept runs (M7) ────
       const { data: track } = await db
         .from("cr_tracks")
-        .select("points, par_time_ms, active")
+        .select("points, par_time_ms, world_length, active")
         .eq("id", body.trackId)
         .maybeSingle();
       if (!track) return reply.code(404).send({ error: "track not found" });
       if (!track.active) return reply.code(409).send({ error: "track version is not active" });
+      const parTimeMs = (track.par_time_ms as number | null) ?? undefined;
+      const ceiling = maxReasonableScore({
+        parTimeMs,
+        worldLength: Number(track.world_length) || 0,
+      });
 
       // Reserve a verify slot for the remainder of this submission (M4).
       verifyInFlight += 1;
@@ -244,20 +253,15 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
         }
         const runId = inserted.id as number;
 
-        // ── Verify (serial queue) ───────────────────────────────────────
+        // ── Verify (serial queue) — server re-sim is the SOLE truth ─────
         const result = await runSerial(() =>
           Promise.resolve(
             verifyRun({
               points: track.points as TrackPoint[],
-              parTimeMs: (track.par_time_ms as number | null) ?? undefined,
+              parTimeMs,
               inputLog: body.inputLog,
-              client: {
-                score: body.clientScore,
-                flips: body.flips ?? 0,
-                crashes: body.crashes ?? 0,
-                finished: Boolean(body.finished),
-                timeMs: body.timeMs,
-              },
+              submittedTicks: body.ticks,
+              maxScore: ceiling,
             }),
           ),
         );
@@ -274,12 +278,21 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
         }
         req.log.info({ runId, durationMs: result.durationMs, status: verifyStatus }, "run verified");
 
+        // Server values are authoritative — the ONLY numbers that rank/pay.
+        // client_score (stored at insert) stays as the labeled estimate.
         const serverScore = result.server ? Math.round(result.server.score) : null;
-        const serverFinished = result.server ? result.server.finished : Boolean(body.finished);
-        await db
-          .from("cr_runs")
-          .update({ verify_status: verifyStatus, server_score: serverScore, finished: serverFinished })
-          .eq("id", runId);
+        const serverFinished = result.server ? result.server.finished : false;
+        const update: Record<string, unknown> = {
+          verify_status: verifyStatus,
+          server_score: serverScore,
+          finished: serverFinished,
+        };
+        if (result.server) {
+          // Show real (server) trick stats on the leaderboard, not the estimate.
+          update.flips = result.server.flips;
+          update.crashes = result.server.crashes;
+        }
+        await db.from("cr_runs").update(update).eq("id", runId);
 
         // ── Ranks (only verified + finished earns a rank) ─────────────────
         let rankThisWindow: number | undefined;

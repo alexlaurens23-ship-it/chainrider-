@@ -60,6 +60,7 @@ export function showRunComplete(
     <div class="run-card">
       <div class="rc-head">${summary.finished ? "FINISH" : "RUN ENDED — no finish, tricks only"}</div>
       <div class="rc-score">${formatScore(summary.score)}</div>
+      <div class="rc-estimate">your local estimate — official score is server-verified</div>
       <div class="stars">${starHtml}</div>
       <div class="rc-breakdown">Speed ${formatScore(summary.speedScore)} + Tricks ${formatScore(summary.trickBonus)}</div>
       <div class="rc-grid">
@@ -92,14 +93,20 @@ export function showRunComplete(
     handlers
       .autoSubmit()
       .then((res) => {
+        // The server's score is authoritative; the card's big number was the
+        // local estimate (they can differ slightly — the server number is real).
+        const official = res.serverScore != null ? ` — official score ${formatScore(res.serverScore)}` : "";
         if (res.verifyStatus === "verified" && res.rankThisWindow && res.rankAllTime) {
-          statusEl.textContent = `VERIFIED ✓  #${res.rankThisWindow} this window · #${res.rankAllTime} all-time`;
+          statusEl.textContent = `VERIFIED ✓${official} · #${res.rankThisWindow} this window · #${res.rankAllTime} all-time`;
           statusEl.classList.add("ok");
         } else if (res.verifyStatus === "verified") {
-          statusEl.textContent = "VERIFIED ✓";
+          statusEl.textContent = `VERIFIED ✓${official}`;
           statusEl.classList.add("ok");
+        } else if (res.verifyStatus === "flagged") {
+          statusEl.textContent = "Under review";
+        } else if (!summary.finished) {
+          statusEl.textContent = "No finish — reach the flag to rank";
         } else {
-          // flagged / failed / unranked DNF — calm, no scary wording.
           statusEl.textContent = "Couldn't verify this run";
         }
       })
