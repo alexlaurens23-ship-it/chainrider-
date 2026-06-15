@@ -26,6 +26,10 @@ export function simulateReplay(
   const sim = createSim(trackPoints, tune, { parTimeMs });
   let keymask = 0;
   let next = 0;
+  // Furthest forward the chassis ever reached (used by the server's progress
+  // check — a crash respawns backward to a checkpoint, so final-x understates
+  // real travel). Purely observed; never feeds physics or scoring.
+  let maxX = sim.chassis.getPosition().x;
   while (sim.tick < maxTicks) {
     // sim.tick is the index of the step about to be taken.
     while (next < inputLog.length && inputLog[next][0] <= sim.tick) {
@@ -33,6 +37,8 @@ export function simulateReplay(
       next += 1;
     }
     stepSim(sim, keymask);
+    const x = sim.chassis.getPosition().x;
+    if (x > maxX) maxX = x;
     if (sim.finished) break;
   }
 
@@ -52,5 +58,6 @@ export function simulateReplay(
     finished: sim.finished,
     simVersion: SIM_VERSION,
     finalChassis: snap.chassis,
+    maxX,
   };
 }

@@ -253,14 +253,25 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
         }
         const runId = inserted.id as number;
 
-        // ── Verify (serial queue) — server re-sim is the SOLE truth ─────
+        // ── Verify (serial queue) — replay only proves a real ride; the
+        // CLIENT's score is trusted (cross-engine float makes the server's
+        // replayed score unusable). Manual replay review gates payouts.
+        const clientScore = Math.round(body.clientScore);
+        const clientFinished = Boolean(body.finished);
         const result = await runSerial(() =>
           Promise.resolve(
             verifyRun({
               points: track.points as TrackPoint[],
               parTimeMs,
+              worldLength: Number(track.world_length) || 0,
               inputLog: body.inputLog,
               submittedTicks: body.ticks,
+              client: {
+                score: clientScore,
+                flips: body.flips ?? 0,
+                finished: clientFinished,
+                timeMs: Math.round(body.timeMs),
+              },
               maxScore: ceiling,
             }),
           ),
@@ -276,33 +287,34 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
           );
           verifyStatus = "failed";
         }
-        req.log.info({ runId, durationMs: result.durationMs, status: verifyStatus }, "run verified");
+        req.log.info(
+          { runId, durationMs: result.durationMs, progressM: result.progressMeters, status: verifyStatus },
+          "run verified",
+        );
 
-        // Server values are authoritative — the ONLY numbers that rank/pay.
-        // client_score (stored at insert) stays as the labeled estimate.
-        const serverScore = result.server ? Math.round(result.server.score) : null;
-        const serverFinished = result.server ? result.server.finished : false;
+        // The client's reported values are official — the numbers that rank/pay
+        // and display. server_score holds the official score (kept as the column
+        // all downstream — ranking, leaderboards, payouts — already reads). A
+        // failed run earns no score.
+        const officialScore = verifyStatus === "failed" ? null : clientScore;
         const update: Record<string, unknown> = {
           verify_status: verifyStatus,
-          server_score: serverScore,
-          finished: serverFinished,
+          server_score: officialScore,
+          finished: clientFinished,
+          flips: body.flips ?? 0,
+          crashes: body.crashes ?? 0,
         };
-        if (result.server) {
-          // Show real (server) trick stats on the leaderboard, not the estimate.
-          update.flips = result.server.flips;
-          update.crashes = result.server.crashes;
-        }
         await db.from("cr_runs").update(update).eq("id", runId);
 
         // ── Ranks (only verified + finished earns a rank) ─────────────────
         let rankThisWindow: number | undefined;
         let rankAllTime: number | undefined;
-        if (eligibleForRank(verifyStatus, serverFinished) && serverScore !== null) {
-          rankThisWindow = await rankByScore(db, body.trackId, serverScore, windowId);
-          rankAllTime = await rankByScore(db, body.trackId, serverScore, null);
+        if (eligibleForRank(verifyStatus, clientFinished) && officialScore !== null) {
+          rankThisWindow = await rankByScore(db, body.trackId, officialScore, windowId);
+          rankAllTime = await rankByScore(db, body.trackId, officialScore, null);
         }
 
-        return { verifyStatus, serverScore, rankThisWindow, rankAllTime };
+        return { verifyStatus, serverScore: officialScore, rankThisWindow, rankAllTime };
       } finally {
         verifyInFlight -= 1;
       }

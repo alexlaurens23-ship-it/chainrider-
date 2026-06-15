@@ -116,7 +116,11 @@ export function createAdminScreen(): Screen {
   function pendingRow(p: PendingPayout): string {
     return `<div class="pay-row" id="pay-${p.id}">
       <div class="pay-head">#${p.rank} · ${p.label} · <b>${formatSol(p.amountSol)} SOL</b></div>
-      <div class="pay-line">@${p.username} · <a href="#/replay/${p.runId}">replay ▸</a></div>
+      <div class="pay-line">@${p.username}</div>
+      <div class="pay-act review">
+        <a class="btn-secondary" href="#/replay/${p.runId}">WATCH REPLAY</a>
+        <span class="hint">review this ride before sending SOL</span>
+      </div>
       <div class="pay-copy"><code>${p.wallet}</code><button class="copy" data-copy="${p.wallet}">copy addr</button></div>
       <div class="pay-copy"><code>${formatSol(p.amountSol)}</code><button class="copy" data-copy="${p.amountSol}">copy amt</button></div>
       <div class="pay-act">
@@ -172,7 +176,7 @@ export function createAdminScreen(): Screen {
     getFlaggedRuns()
       .then((runs) => {
         if (runs.length === 0) {
-          body.innerHTML = `<div class="empty-state">No flagged runs. Anything within ±5% of the server score is held here.</div>`;
+          body.innerHTML = `<div class="empty-state">No flagged runs. Held here for manual review: no real progress, implausible score, or over the per-track ceiling.</div>`;
           return;
         }
         body.innerHTML = runs.map(flaggedRow).join("");
@@ -184,9 +188,7 @@ export function createAdminScreen(): Screen {
   function flaggedRow(r: FlaggedRun): string {
     return `<div class="pay-row" id="flag-${r.runId}">
       <div class="pay-head">${r.label}</div>
-      <div class="pay-line">@${r.username} · client ${formatScore(r.clientScore)} vs server ${
-        r.serverScore != null ? formatScore(r.serverScore) : "—"
-      }</div>
+      <div class="pay-line">@${r.username} · claimed ${formatScore(r.clientScore)}</div>
       <div class="pay-act">
         <a class="btn-secondary" href="#/replay/${r.runId}">WATCH REPLAY</a>
         <button class="btn-primary approve">APPROVE</button>

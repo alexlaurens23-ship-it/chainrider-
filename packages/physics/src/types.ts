@@ -263,4 +263,6 @@ export interface FinalResult {
   finished: boolean;
   simVersion: number;
   finalChassis: BodyPose;
+  /** Furthest forward (max) chassis-center x reached during the run, world meters. */
+  maxX: number;
 }
