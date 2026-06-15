@@ -5,6 +5,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { requireAuth } from "../auth.js";
 import { getDb } from "../db.js";
 import { eligibleForRank, verifyRun } from "../runVerify.js";
+import { ensureOpenWindow } from "../windows.js";
 
 interface SubmitBody {
   trackId: number;
@@ -24,8 +25,6 @@ interface SubmitBody {
 const MAX_INPUT_LOG = 90000;
 /** Per-player submission throttle. */
 const RATE_LIMIT_MS = 10_000;
-/** UTC-aligned payout window length (30 min). */
-const WINDOW_MS = 30 * 60 * 1000;
 /**
  * Max submissions doing verify work at once (M4). The per-run cost is already
  * bounded by MAX_REPLAY_TICKS and isn't attacker-inflatable, so the real DoS
@@ -65,50 +64,6 @@ function runSerial<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-/**
- * Bucket the run into the current UTC-aligned 30-min payout window (M3). Returns
- * the window id only if it's OPEN — a run for a slot the cron already closed gets
- * null (counts for all-time rank, but not re-paid into a closed window). The
- * unique index on starts_at (sql/006) makes create idempotent, so two concurrent
- * first-submits can't double-create the slot. P7's cron owns the window lifecycle.
- */
-async function getOrCreateOpenWindow(db: SupabaseClient): Promise<number | null> {
-  const startMs = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
-  const startsAt = new Date(startMs).toISOString();
-
-  const existing = await db
-    .from("cr_payout_windows")
-    .select("id, status")
-    .eq("starts_at", startsAt)
-    .maybeSingle();
-  if (existing.data) {
-    return existing.data.status === "open" ? (existing.data.id as number) : null;
-  }
-
-  // Insert; the unique index turns a concurrent double-insert into a no-op that
-  // we recover from by re-selecting.
-  const created = await db
-    .from("cr_payout_windows")
-    .upsert(
-      { starts_at: startsAt, ends_at: new Date(startMs + WINDOW_MS).toISOString(), status: "open" },
-      { onConflict: "starts_at", ignoreDuplicates: true },
-    )
-    .select("id, status")
-    .maybeSingle();
-  if (created.data) {
-    return created.data.status === "open" ? (created.data.id as number) : null;
-  }
-
-  // Upsert was ignored (lost the create race) — re-select the existing row.
-  const reselect = await db
-    .from("cr_payout_windows")
-    .select("id, status")
-    .eq("starts_at", startsAt)
-    .maybeSingle();
-  if (!reselect.data) return null;
-  return reselect.data.status === "open" ? (reselect.data.id as number) : null;
-}
-
 /** Count of strictly-higher verified+finished server_scores on a track (+1 = rank). */
 async function rankByScore(
   db: SupabaseClient,
@@ -131,6 +86,64 @@ async function rankByScore(
 /** Run submission + server-side re-simulation via @chainrider/physics (cr_runs). */
 export const runsRoutes: FastifyPluginAsync = async (app) => {
   app.decorateRequest("player", null);
+
+  // ── Public replay source ────────────────────────────────────────────────
+  // Replays are shareable proof (no auth) — return the stored input log + the
+  // track id; the client fetches frozen points via /tracks/:id and re-sims it
+  // read-only. Never exposes anything sensitive.
+  app.get<{ Params: { runId: string } }>(
+    "/:runId/replay",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["runId"],
+          properties: { runId: { type: "string", pattern: "^[0-9]+$" } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const db = getDb();
+      const { data, error } = await db
+        .from("cr_runs")
+        .select(
+          "track_id,input_log,server_score,verify_status,time_ms,cr_players(username),cr_tracks(tier,mode,cr_maps(symbol,period))",
+        )
+        .eq("id", Number(req.params.runId))
+        .maybeSingle();
+      if (error) {
+        req.log.error(error, "replay query failed");
+        return reply.code(500).send({ error: "database error" });
+      }
+      if (!data) return reply.code(404).send({ error: "run not found" });
+      const row = data as unknown as {
+        track_id: number;
+        input_log: InputLogEntry[];
+        server_score: number | null;
+        verify_status: string;
+        time_ms: number;
+        cr_players: { username: string } | null;
+        cr_tracks: {
+          tier: string;
+          mode: string;
+          cr_maps: { symbol: string; period: string } | null;
+        } | null;
+      };
+      const t = row.cr_tracks;
+      const label = t
+        ? `${t.cr_maps?.symbol ?? "?"} ${t.cr_maps?.period ?? "?"} ${t.tier} · ${t.mode}`
+        : "track";
+      return {
+        trackId: row.track_id,
+        inputLog: row.input_log ?? [],
+        username: row.cr_players?.username ?? "—",
+        label,
+        serverScore: row.server_score,
+        verifyStatus: row.verify_status,
+        timeMs: row.time_ms,
+      };
+    },
+  );
 
   app.post<{ Body: SubmitBody }>(
     "/submit",
@@ -206,7 +219,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       verifyInFlight += 1;
       try {
         // ── Bucket into the open window + insert as pending ───────────────
-        const windowId = await getOrCreateOpenWindow(db);
+        const windowId = await ensureOpenWindow(db);
         const { data: inserted, error: insErr } = await db
           .from("cr_runs")
           .insert({

@@ -2,7 +2,9 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { assertJwtSecretStrength } from "./auth.js";
+import { startWindowEngine } from "./windows.js";
 import { adminRoutes } from "./routes/admin.js";
+import { adminPayoutsRoutes } from "./routes/adminPayouts.js";
 import { authRoutes } from "./routes/auth.js";
 import { leaderboardsRoutes } from "./routes/leaderboards.js";
 import { payoutPoolRoutes } from "./routes/payoutPool.js";
@@ -32,6 +34,10 @@ async function main(): Promise<void> {
   await app.register(payoutsRoutes, { prefix: "/api/payouts" });
   await app.register(payoutPoolRoutes, { prefix: "/api/payout-pool" });
   await app.register(adminRoutes, { prefix: "/api/admin" });
+  await app.register(adminPayoutsRoutes, { prefix: "/api/admin" });
+
+  // Open/close the 30-min UTC payout windows on a cron. SINGLE INSTANCE ONLY.
+  startWindowEngine(app);
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
 }

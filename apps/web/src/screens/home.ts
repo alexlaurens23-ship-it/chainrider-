@@ -1,6 +1,14 @@
-import { getMapsCached, getStats, getTrackCached, type MapEntry, type StatsResponse } from "../net";
+import {
+  getMapsCached,
+  getPayoutBoard,
+  getStats,
+  getTrackCached,
+  type MapEntry,
+  type PayoutBoard,
+  type StatsResponse,
+} from "../net";
 import type { Screen } from "../router";
-import { formatCountdown, formatSol } from "../ui/format";
+import { formatCountdown, formatScore, formatSol, tierColor } from "../ui/format";
 import { drawSparkline } from "../ui/sparkline";
 
 export function createHomeScreen(): Screen {
@@ -13,6 +21,7 @@ export function createHomeScreen(): Screen {
       page.innerHTML = `
         <div class="topnav">
           <a href="#/">HOME</a>
+          <a href="#/payouts">PAYOUTS</a>
           <a href="#/playground">PLAYGROUND</a>
         </div>
         <h1 class="hero-title">CHAINRIDER</h1>
@@ -21,10 +30,12 @@ export function createHomeScreen(): Screen {
           <div><div class="stat-num" id="rides">—</div><div class="stat-label">RIDES COMPLETED</div></div>
           <div><div class="stat-num" id="sol">—</div><div class="stat-label">TOTAL SOL PAID</div></div>
         </div>
-        <div class="countdown">
-          <span>NEXT PAYOUT IN</span>
-          <span class="cd-time" id="cd">--:--</span>
+        <div class="board-head">
+          <div class="section-title">PAYOUT BOARD · 20 PAYING TRACKS</div>
+          <div class="countdown"><span>WINDOW CLOSES IN</span> <span class="cd-time" id="cd">--:--</span></div>
         </div>
+        <div id="payout-board"><div class="empty-state">Loading payout board…</div></div>
+        <div class="board-foot"><a href="#/payouts">see who we've paid →</a></div>
         <div class="section-title">TRENDING TRACKS</div>
         <div class="card-grid" id="grid"><div class="empty-state">Loading tracks…</div></div>
       `;
@@ -34,27 +45,35 @@ export function createHomeScreen(): Screen {
       const ridesEl = page.querySelector<HTMLDivElement>("#rides")!;
       const solEl = page.querySelector<HTMLDivElement>("#sol")!;
       const cdEl = page.querySelector<HTMLSpanElement>("#cd")!;
+      const boardEl = page.querySelector<HTMLDivElement>("#payout-board")!;
 
-      let windowMinutes = 30;
+      // Countdown to the window's real ends_at (falls back to UTC-modulo).
+      let endsAtMs = Math.ceil(Date.now() / 1_800_000) * 1_800_000;
+      function tickCountdown(): void {
+        cdEl.textContent = formatCountdown(endsAtMs - Date.now());
+      }
+      tickCountdown();
+      countdownTimer = window.setInterval(tickCountdown, 1000);
 
       getStats()
         .then((stats: StatsResponse) => {
           ridesEl.textContent = stats.ridesCompleted.toLocaleString("en-US");
           solEl.textContent = formatSol(stats.totalSolPaid);
-          windowMinutes = stats.config.windowMinutes || 30;
-          tickCountdown();
         })
         .catch(() => {
           ridesEl.textContent = "0";
           solEl.textContent = "0";
         });
 
-      function tickCountdown(): void {
-        const windowMs = windowMinutes * 60_000;
-        cdEl.textContent = formatCountdown(windowMs - (Date.now() % windowMs));
-      }
-      tickCountdown();
-      countdownTimer = window.setInterval(tickCountdown, 1000);
+      getPayoutBoard()
+        .then((board) => {
+          endsAtMs = new Date(board.endsAt).getTime();
+          tickCountdown();
+          renderPayoutBoard(boardEl, board);
+        })
+        .catch(() => {
+          boardEl.innerHTML = `<div class="empty-state">Could not load the payout board.</div>`;
+        });
 
       getMapsCached()
         .then((res) => renderCards(grid, res.maps))
@@ -67,6 +86,29 @@ export function createHomeScreen(): Screen {
       window.clearInterval(countdownTimer);
     },
   };
+}
+
+function renderPayoutBoard(el: HTMLElement, board: PayoutBoard): void {
+  if (board.tracks.length === 0) {
+    el.innerHTML = `<div class="empty-state">No paying tracks graded yet.</div>`;
+    return;
+  }
+  const rows = board.tracks
+    .map((t) => {
+      const apex = t.rank === 1 ? " apex" : "";
+      const tColor = t.tier ? tierColor(t.tier as never) : "#9fb4c8";
+      const leader = t.leader
+        ? `<span class="pb-leader">@${t.leader.username} · ${formatScore(t.leader.score)}</span>`
+        : `<span class="pb-open">open — be first</span>`;
+      return `<a class="pb-row${apex}" href="#/ride/${t.trackId}">
+        <span class="pb-rank">#${t.rank}</span>
+        <span class="pb-label"><span class="pb-dot" style="background:${tColor}"></span>${t.label}</span>
+        <span class="pb-prize">${formatSol(t.prizeSol)} SOL</span>
+        <span class="pb-leadwrap">${leader}</span>
+      </a>`;
+    })
+    .join("");
+  el.innerHTML = `<div class="payout-board">${rows}</div>`;
 }
 
 const SPARK_ACCENT = "#00e5ff"; // brand cyan

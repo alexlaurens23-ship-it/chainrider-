@@ -1,10 +1,13 @@
 import {
-  getLeaderboard,
+  getGlobalLeaderboard,
   getMapsCached,
+  getMyLeaderboard,
   getTrackCached,
   TIERS,
-  type LeaderRow,
+  type GlobalEntry,
+  type LeaderboardScope,
   type MapEntry,
+  type MyBoard,
   type Tier,
   type TrackSummary,
 } from "../net";
@@ -93,8 +96,14 @@ export function createMapDetailScreen(): Screen {
       </div>
       <canvas class="chart-preview" id="preview"></canvas>
       <div class="stats-row" id="stats"></div>
-      <div class="section-title">TOP 10 — ALL TIME</div>
+      <div class="section-title">GLOBAL</div>
+      <div class="tabs lb-tabs">
+        <button class="tab active" data-scope="window">THIS WINDOW</button>
+        <button class="tab" data-scope="alltime">ALL-TIME</button>
+      </div>
       <div id="board"></div>
+      <div class="section-title">YOUR PBs</div>
+      <div id="myboard"></div>
       <div style="margin-top:24px">
         <button class="btn-primary" id="ride-btn">RIDE THIS CHART ▸</button>
         <div class="ride-hint" id="ride-hint">${isLoggedIn() ? "" : "Log in to ride & win SOL"}</div>
@@ -111,9 +120,24 @@ export function createMapDetailScreen(): Screen {
     const preview = detail.querySelector<HTMLCanvasElement>("#preview")!;
     const statsEl = detail.querySelector<HTMLDivElement>("#stats")!;
     const boardEl = detail.querySelector<HTMLDivElement>("#board")!;
+    const myEl = detail.querySelector<HTMLDivElement>("#myboard")!;
     const rideBtn = detail.querySelector<HTMLButtonElement>("#ride-btn")!;
     const tierBtnEls = detail.querySelectorAll<HTMLButtonElement>(".tier-btn");
     const modeBtns = detail.querySelectorAll<HTMLButtonElement>(".mode-btn");
+
+    let scope: LeaderboardScope = "window";
+    let currentSummary: TrackSummary | null = null;
+
+    // Scope tabs (This Window / All-Time) re-query the global board only.
+    for (const btn of detail.querySelectorAll<HTMLButtonElement>(".lb-tabs .tab")) {
+      btn.addEventListener("click", () => {
+        scope = btn.dataset.scope as LeaderboardScope;
+        for (const b of detail.querySelectorAll<HTMLButtonElement>(".lb-tabs .tab")) {
+          b.classList.toggle("active", b === btn);
+        }
+        renderGlobal(boardEl, currentSummary, scope);
+      });
+    }
 
     const applySelection = (): void => {
       for (const btn of tierBtnEls) {
@@ -127,9 +151,12 @@ export function createMapDetailScreen(): Screen {
 
       const summary = map.tiers[tier]?.[mode] ?? null;
       const prize = map.tiers[tier]?.prize ?? null;
+      currentSummary = summary;
       renderPreview(preview, summary);
       renderStats(statsEl, tier, summary, prize);
-      renderBoard(boardEl, summary);
+      // Per-track: both boards refetch when tier/mode/period selection changes.
+      renderGlobal(boardEl, summary, scope);
+      renderMyBoard(myEl, summary);
       if (summary) {
         rideBtn.disabled = false;
         rideBtn.onclick = () => {
@@ -200,23 +227,30 @@ function renderStats(
   `;
 }
 
-function renderBoard(el: HTMLElement, summary: TrackSummary | null): void {
+/** Per-track global board (one row per player), This-Window or All-Time. */
+function renderGlobal(el: HTMLElement, summary: TrackSummary | null, scope: LeaderboardScope): void {
   if (!summary) {
     el.innerHTML = "";
     return;
   }
-  // Keyed to the selected tier+mode track so it's ready when P7 fills it in.
+  const trackId = summary.trackId;
   el.innerHTML = `<div class="empty-state">Loading…</div>`;
-  getLeaderboard(summary.trackId)
-    .then((rows: LeaderRow[]) => {
+  getGlobalLeaderboard(trackId, scope)
+    .then((rows: GlobalEntry[]) => {
+      // A late response for a track we've since switched away from is ignored.
+      if (summary.trackId !== trackId) return;
       if (rows.length === 0) {
-        el.innerHTML = `<div class="empty-state">No runs yet — be the first to set a time.</div>`;
+        const msg =
+          scope === "window"
+            ? "No verified runs this window yet — be first."
+            : "No runs yet — be the first to set a time.";
+        el.innerHTML = `<div class="empty-state">${msg}</div>`;
         return;
       }
       const body = rows
         .map(
           (r) =>
-            `<tr><td>${r.rank}</td><td>${r.player}</td><td>${formatScore(r.score)}</td><td>${formatClock(r.timeMs)}</td></tr>`,
+            `<tr><td>${r.rank}</td><td>@${r.username}</td><td>${formatScore(r.score)}</td><td>${formatClock(r.timeMs)}</td></tr>`,
         )
         .join("");
       el.innerHTML = `<table class="leaderboard">
@@ -225,6 +259,44 @@ function renderBoard(el: HTMLElement, summary: TrackSummary | null): void {
     })
     .catch(() => {
       el.innerHTML = `<div class="empty-state">Could not load leaderboard.</div>`;
+    });
+}
+
+/** The logged-in player's top-5 PBs on this track + their all-time rank. */
+function renderMyBoard(el: HTMLElement, summary: TrackSummary | null): void {
+  if (!summary) {
+    el.innerHTML = "";
+    return;
+  }
+  if (!isLoggedIn()) {
+    el.innerHTML = `<div class="empty-state">Log in to track your bests.</div>`;
+    return;
+  }
+  const trackId = summary.trackId;
+  el.innerHTML = `<div class="empty-state">Loading…</div>`;
+  getMyLeaderboard(trackId)
+    .then((mine: MyBoard) => {
+      if (summary.trackId !== trackId) return;
+      if (mine.best.length === 0) {
+        el.innerHTML = `<div class="empty-state">No verified runs yet on this track.</div>`;
+        return;
+      }
+      const rankLine =
+        mine.allTimeRank != null
+          ? `<div class="my-rank">All-time rank: <b>${ordinal(mine.allTimeRank)}</b></div>`
+          : "";
+      const body = mine.best
+        .map(
+          (r) =>
+            `<tr><td>${r.rank}</td><td>${formatScore(r.score)}</td><td>${formatClock(r.timeMs)}</td><td>${r.flips}</td></tr>`,
+        )
+        .join("");
+      el.innerHTML = `${rankLine}<table class="leaderboard">
+        <thead><tr><th>#</th><th>SCORE</th><th>TIME</th><th>FLIPS</th></tr></thead>
+        <tbody>${body}</tbody></table>`;
+    })
+    .catch(() => {
+      el.innerHTML = `<div class="empty-state">Could not load your bests.</div>`;
     });
 }
 

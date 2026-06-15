@@ -1,6 +1,9 @@
+import { createAdminScreen } from "./screens/admin";
 import { createHomeScreen } from "./screens/home";
 import { createMapDetailScreen } from "./screens/mapDetail";
+import { createPayoutsScreen } from "./screens/payouts";
 import { createPlaygroundScreen } from "./screens/playground";
+import { createReplayScreen } from "./screens/replay";
 import { createRideScreen } from "./screens/ride";
 
 /** A screen owns all DOM it creates inside `root` and tears it down on unmount. */
@@ -23,6 +26,9 @@ const ROUTES: Route[] = [
   // Same screen with a preselected tier (deep-link from Home's tier chips).
   { pattern: ["map", ":slug", ":period", ":tier"], factory: createMapDetailScreen, scroll: true },
   { pattern: ["ride", ":trackId"], factory: createRideScreen, scroll: false },
+  { pattern: ["replay", ":runId"], factory: createReplayScreen, scroll: false },
+  { pattern: ["payouts"], factory: createPayoutsScreen, scroll: true },
+  { pattern: ["admin"], factory: createAdminScreen, scroll: true },
   { pattern: ["playground"], factory: createPlaygroundScreen, scroll: false },
 ];
 

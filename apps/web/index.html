@@ -811,6 +811,244 @@
         width: 16px;
         height: 16px;
       }
+
+      /* ── Payout board (Home centrepiece) ───────────────────────────────── */
+      .board-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .board-head .countdown {
+        color: #9fb4c8;
+        font-size: 12px;
+        letter-spacing: 1px;
+      }
+      .board-head .cd-time {
+        color: #00e5ff;
+        font-weight: bold;
+        font-size: 16px;
+      }
+      .payout-board {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .pb-row {
+        display: grid;
+        grid-template-columns: 44px 1fr auto minmax(0, 38%);
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border: 1px solid rgba(91, 113, 132, 0.18);
+        border-radius: 8px;
+        background: rgba(10, 20, 32, 0.5);
+        color: #e0ffff;
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .pb-row:hover {
+        border-color: #00e5ff;
+      }
+      .pb-rank {
+        color: #5b7184;
+        font-weight: bold;
+      }
+      .pb-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pb-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 7px;
+        vertical-align: middle;
+      }
+      .pb-prize {
+        color: #ffb000;
+        font-weight: bold;
+        white-space: nowrap;
+      }
+      .pb-leadwrap {
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pb-leader {
+        color: #00ff88;
+      }
+      .pb-open {
+        color: #5b7184;
+        font-style: italic;
+      }
+      .pb-row.apex {
+        border-color: #ffb000;
+        background: linear-gradient(90deg, rgba(255, 176, 0, 0.12), rgba(0, 229, 255, 0.06));
+        box-shadow: 0 0 16px rgba(255, 176, 0, 0.35);
+      }
+      .pb-row.apex .pb-rank {
+        color: #ffb000;
+      }
+      .pb-row.apex .pb-prize {
+        font-size: 15px;
+      }
+      .board-foot {
+        text-align: right;
+        margin-bottom: 26px;
+      }
+      .board-foot a {
+        color: #00e5ff;
+        font-size: 12px;
+      }
+      .my-rank {
+        color: #9fb4c8;
+        font-size: 13px;
+        margin-bottom: 8px;
+      }
+
+      /* ── Public receipts (#/payouts) ───────────────────────────────────── */
+      .receipts .amt {
+        color: #ffb000;
+        font-weight: bold;
+      }
+      .receipts a {
+        color: #00e5ff;
+      }
+
+      /* ── Replay banner ─────────────────────────────────────────────────── */
+      .replay-banner {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 6;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        font-size: 13px;
+        color: #9fb4c8;
+        background: rgba(5, 6, 10, 0.6);
+        padding: 6px 12px;
+        border-radius: 8px;
+      }
+      .replay-banner a {
+        color: #00e5ff;
+      }
+
+      /* ── Admin (mobile-first dense) ────────────────────────────────────── */
+      .admin {
+        max-width: 640px;
+      }
+      .admin-unlock {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 320px;
+      }
+      .admin-tabs {
+        margin-bottom: 14px;
+      }
+      .admin-total {
+        font-size: 14px;
+        color: #9fb4c8;
+        margin-bottom: 12px;
+      }
+      .admin-total b {
+        color: #ffb000;
+        font-size: 18px;
+      }
+      .admin-group {
+        color: #5b7184;
+        font-size: 11px;
+        letter-spacing: 1px;
+        margin: 14px 0 6px;
+      }
+      .pay-row {
+        border: 1px solid rgba(91, 113, 132, 0.22);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        background: rgba(10, 20, 32, 0.5);
+        font-size: 13px;
+      }
+      .pay-row.paid {
+        border-color: #00ff88;
+        background: rgba(0, 255, 136, 0.08);
+      }
+      .pay-row.skipped {
+        border-color: #ff3c5a;
+        opacity: 0.7;
+      }
+      .pay-head {
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      .pay-line {
+        color: #9fb4c8;
+        margin-bottom: 6px;
+      }
+      .pay-line a,
+      .pay-row a {
+        color: #00e5ff;
+      }
+      .pay-copy {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 5px;
+      }
+      .pay-copy code {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #e0ffff;
+        background: #05060a;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+      }
+      .copy {
+        background: #0a1420;
+        color: #00e5ff;
+        border: 1px solid #00e5ff;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: monospace;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pay-act {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-top: 8px;
+      }
+      .pay-act .sig {
+        flex: 1;
+        min-width: 140px;
+      }
+      .pay-act .btn-primary,
+      .pay-act .btn-secondary {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+      .pay-status {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #9fb4c8;
+        min-height: 14px;
+      }
+      .pay-row.paid .pay-status {
+        color: #00ff88;
+      }
     </style>
   </head>
   <body>

@@ -15,11 +15,17 @@ export class ApiError extends Error {
   }
 }
 
+/** sessionStorage key for the owner admin key (separate from the player JWT). */
+export const ADMIN_KEY_STORAGE = "cr_admin_key";
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // Attach the player JWT (if logged in) so authed routes accept the request.
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set("authorization", `Bearer ${token}`);
+  // Attach the admin key (only set on #/admin) for X-Admin-Key-gated routes.
+  const adminKey = sessionStorage.getItem(ADMIN_KEY_STORAGE);
+  if (adminKey) headers.set("x-admin-key", adminKey);
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
     // Surface the server's { error } message (e.g. lockout text) when present.
@@ -196,8 +202,140 @@ export function getStats(): Promise<StatsResponse> {
   return apiFetch<StatsResponse>("/stats");
 }
 
-export function getLeaderboard(trackId: number): Promise<LeaderRow[]> {
-  return apiFetch<LeaderRow[]>(`/leaderboards/${trackId}`);
+// ── Leaderboards + payout board (P7) ─────────────────────────────────────────
+
+export type LeaderboardScope = "alltime" | "window";
+
+export interface GlobalEntry {
+  rank: number;
+  username: string;
+  score: number;
+  timeMs: number;
+  flips: number;
+  createdAt: string;
+}
+
+export interface MyBoard {
+  allTimeRank: number | null;
+  best: { rank: number; score: number; timeMs: number; flips: number; createdAt: string }[];
+}
+
+export interface PayoutBoardRow {
+  rank: number;
+  trackId: number;
+  prizeSol: number;
+  symbol: string | null;
+  period: string | null;
+  tier: string | null;
+  mode: string | null;
+  label: string;
+  leader: { username: string; score: number } | null;
+}
+export interface PayoutBoard {
+  endsAt: string;
+  tracks: PayoutBoardRow[];
+}
+
+export function getPayoutBoard(): Promise<PayoutBoard> {
+  return apiFetch<PayoutBoard>("/leaderboards/payout-board");
+}
+
+export function getGlobalLeaderboard(
+  trackId: number,
+  scope: LeaderboardScope,
+): Promise<GlobalEntry[]> {
+  return apiFetch<GlobalEntry[]>(`/leaderboards/${trackId}/global?scope=${scope}`);
+}
+
+export function getMyLeaderboard(trackId: number): Promise<MyBoard> {
+  return apiFetch<MyBoard>(`/leaderboards/${trackId}/me`);
+}
+
+// ── Public receipts + replay (P7) ────────────────────────────────────────────
+
+export interface ReceiptRow {
+  paidAt: string | null;
+  label: string;
+  username: string;
+  amountSol: number;
+  txSig: string | null;
+}
+export function getPaidReceipts(): Promise<ReceiptRow[]> {
+  return apiFetch<ReceiptRow[]>("/payouts/paid");
+}
+
+export interface ReplayData {
+  trackId: number;
+  inputLog: [number, number][];
+  username: string;
+  label: string;
+  serverScore: number | null;
+  verifyStatus: string;
+  timeMs: number;
+}
+export function getReplay(runId: number): Promise<ReplayData> {
+  return apiFetch<ReplayData>(`/runs/${runId}/replay`);
+}
+
+// ── Admin payout panel (X-Admin-Key, P7) ─────────────────────────────────────
+
+export interface PendingPayout {
+  id: number;
+  windowId: number;
+  windowStartsAt: string | null;
+  trackId: number;
+  runId: number;
+  rank: number;
+  amountSol: number;
+  username: string;
+  wallet: string;
+  label: string;
+}
+export interface PendingPayouts {
+  totalSol: number;
+  payouts: PendingPayout[];
+}
+export function getPendingPayouts(): Promise<PendingPayouts> {
+  return apiFetch<PendingPayouts>("/admin/payouts/pending");
+}
+export function markPaid(id: number, txSig: string): Promise<{ ok: boolean }> {
+  return postJson(`/admin/payouts/${id}/paid`, { txSig });
+}
+export function skipPayout(id: number, reason: string): Promise<{ ok: boolean }> {
+  return postJson(`/admin/payouts/${id}/skip`, { reason });
+}
+
+export interface FlaggedRun {
+  runId: number;
+  username: string;
+  clientScore: number;
+  serverScore: number | null;
+  timeMs: number;
+  createdAt: string;
+  windowId: number | null;
+  label: string;
+}
+export function getFlaggedRuns(): Promise<FlaggedRun[]> {
+  return apiFetch<FlaggedRun[]>("/admin/runs/flagged");
+}
+export function approveRun(id: number): Promise<{ ok: boolean }> {
+  return postJson(`/admin/runs/${id}/approve`, {});
+}
+export function rejectRun(id: number): Promise<{ ok: boolean }> {
+  return postJson(`/admin/runs/${id}/reject`, {});
+}
+
+export interface WindowHistoryRow {
+  id: number;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  totalSol: number;
+  pendingCount: number;
+  paidCount: number;
+}
+export function getWindowHistory(): Promise<WindowHistoryRow[]> {
+  return apiFetch<WindowHistoryRow[]>("/admin/windows");
 }
 
 export function submitRun(payload: SubmitRunPayload): Promise<SubmitRunResult> {
