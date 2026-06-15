@@ -1,3 +1,5 @@
+import { getToken } from "../auth";
+import type { SubmitRunResult } from "../net";
 import { formatClock, formatScore } from "../ui/format";
 
 /** Score as a fraction of the track's max earns stars at these cutoffs. */
@@ -23,7 +25,7 @@ export interface RunSummary {
 
 export interface RunCompleteHandlers {
   /** Fired automatically when the card mounts (finish OR quit). */
-  autoSubmit(): Promise<unknown>;
+  autoSubmit(): Promise<SubmitRunResult>;
   onRetry(): void;
   onNewTrack(): void;
 }
@@ -82,16 +84,30 @@ export function showRunComplete(
 
   // Auto-submit the run in the background; reflect status on the card.
   const statusEl = overlay.querySelector<HTMLDivElement>("#rc-status")!;
-  handlers
-    .autoSubmit()
-    .then(() => {
-      statusEl.textContent = "Saved ✓";
-      statusEl.classList.add("ok");
-    })
-    .catch(() => {
-      statusEl.textContent = "Save failed — retry to try again";
-      statusEl.classList.add("fail");
-    });
+  if (!getToken()) {
+    // Submission requires an account — the wallet is the identity.
+    statusEl.textContent = "Connect your wallet to save this run";
+  } else {
+    statusEl.textContent = "Verifying run…";
+    handlers
+      .autoSubmit()
+      .then((res) => {
+        if (res.verifyStatus === "verified" && res.rankThisWindow && res.rankAllTime) {
+          statusEl.textContent = `VERIFIED ✓  #${res.rankThisWindow} this window · #${res.rankAllTime} all-time`;
+          statusEl.classList.add("ok");
+        } else if (res.verifyStatus === "verified") {
+          statusEl.textContent = "VERIFIED ✓";
+          statusEl.classList.add("ok");
+        } else {
+          // flagged / failed / unranked DNF — calm, no scary wording.
+          statusEl.textContent = "Couldn't verify this run";
+        }
+      })
+      .catch(() => {
+        statusEl.textContent = "Save failed — retry to try again";
+        statusEl.classList.add("fail");
+      });
+  }
 
   return () => overlay.remove();
 }

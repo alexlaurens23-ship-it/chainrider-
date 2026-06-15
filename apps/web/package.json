@@ -10,7 +10,8 @@
     "verify": "tsc --noEmit"
   },
   "dependencies": {
-    "@chainrider/physics": "0.1.0"
+    "@chainrider/physics": "0.1.0",
+    "bs58": "^6.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

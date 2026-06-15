@@ -640,6 +640,114 @@
         border-radius: 8px;
         font-size: 13px;
       }
+
+      /* ── Wallet bar (persistent, every screen) ─────────────────────────── */
+      #wallet-bar {
+        position: fixed;
+        top: 12px;
+        right: 16px;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .wb-name {
+        color: #00e5ff;
+        font-size: 13px;
+        font-weight: bold;
+        text-shadow: 0 0 6px rgba(0, 229, 255, 0.5);
+      }
+      .wb-btn {
+        background: #0a1420;
+        color: #00e5ff;
+        border: 1px solid #00e5ff;
+        padding: 7px 14px;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .wb-btn:hover {
+        background: #0e1d2e;
+      }
+      .wb-btn:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .wb-connect {
+        box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+      }
+
+      /* ── Modal (username) ──────────────────────────────────────────────── */
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(5, 6, 10, 0.8);
+      }
+      .modal-card {
+        background: #0a1420;
+        border: 1px solid #00e5ff;
+        border-radius: 12px;
+        padding: 24px 26px;
+        width: 320px;
+        box-shadow: 0 0 30px rgba(0, 229, 255, 0.25);
+        text-align: center;
+      }
+      .modal-title {
+        color: #00e5ff;
+        font-weight: bold;
+        letter-spacing: 2px;
+        margin-bottom: 6px;
+      }
+      .modal-sub {
+        color: #9fb4c8;
+        font-size: 12px;
+        margin-bottom: 16px;
+      }
+      .modal-input {
+        width: 100%;
+        box-sizing: border-box;
+        background: #05060a;
+        border: 1px solid #1d3b4d;
+        color: #e0ffff;
+        font-family: monospace;
+        font-size: 15px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        outline: none;
+      }
+      .modal-input:focus {
+        border-color: #00e5ff;
+      }
+      .modal-error {
+        color: #ff3c5a;
+        font-size: 12px;
+        min-height: 16px;
+        margin: 8px 0;
+      }
+      .modal-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+      .btn-primary {
+        background: linear-gradient(180deg, #00e5ff, #00a6bd);
+        color: #05060a;
+        border: none;
+        padding: 8px 18px;
+        border-radius: 8px;
+        font-family: monospace;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
     </style>
   </head>
   <body>

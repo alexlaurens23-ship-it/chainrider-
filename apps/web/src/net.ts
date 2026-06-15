@@ -1,6 +1,7 @@
 // Thin typed wrapper over the CHAINRIDER api. In dev, Vite proxies /api to
 // http://localhost:8787; in production the api is served from the same origin.
 import type { TrackPoint } from "@chainrider/physics";
+import { getToken } from "./auth";
 
 const API_BASE = "/api";
 
@@ -15,7 +16,11 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  // Attach the player JWT (if logged in) so authed routes accept the request.
+  const token = getToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
     throw new ApiError(response.status, `${path} failed with status ${response.status}`);
   }
@@ -113,14 +118,41 @@ export interface LeaderRow {
 export interface SubmitRunPayload {
   trackId: number;
   mode: "raw" | "smooth";
-  score: number;
+  /** The client's computed score — checked against the server re-sim, never ranked. */
+  clientScore: number;
   timeMs: number;
   ticks: number;
   flips: number;
   crashes: number;
   maxCombo: number;
+  finished: boolean;
   simVersion: number;
   inputLog: [number, number][];
+}
+
+export type VerifyStatus = "verified" | "flagged" | "failed" | "pending";
+
+/** Server's authoritative verdict on a submitted run. */
+export interface SubmitRunResult {
+  verifyStatus: VerifyStatus;
+  serverScore: number | null;
+  /** Present only for verified + finished runs. */
+  rankThisWindow?: number;
+  rankAllTime?: number;
+}
+
+// ── Auth (wallet sign-in) ────────────────────────────────────────────────────
+
+export interface NonceResponse {
+  message: string;
+}
+/** /verify returns either a session or a needs-username signal. */
+export type VerifyResponse =
+  | { token: string; username: string; needsUsername?: undefined }
+  | { needsUsername: true; token?: undefined; username?: undefined };
+export interface SessionResponse {
+  token: string;
+  username: string;
 }
 
 export function getMaps(): Promise<MapsResponse> {
@@ -157,10 +189,34 @@ export function getLeaderboard(trackId: number): Promise<LeaderRow[]> {
   return apiFetch<LeaderRow[]>(`/leaderboards/${trackId}`);
 }
 
-export function submitRun(payload: SubmitRunPayload): Promise<unknown> {
-  return apiFetch<unknown>("/runs/submit", {
+export function submitRun(payload: SubmitRunPayload): Promise<SubmitRunResult> {
+  return apiFetch<SubmitRunResult>("/runs/submit", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function postNonce(walletAddress: string): Promise<NonceResponse> {
+  return postJson<NonceResponse>("/auth/nonce", { walletAddress });
+}
+
+export function postVerify(walletAddress: string, signature: string): Promise<VerifyResponse> {
+  return postJson<VerifyResponse>("/auth/verify", { walletAddress, signature });
+}
+
+export function postRegister(
+  walletAddress: string,
+  signature: string,
+  username: string,
+): Promise<SessionResponse> {
+  return postJson<SessionResponse>("/auth/register", { walletAddress, signature, username });
 }
