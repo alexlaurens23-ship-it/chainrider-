@@ -18,7 +18,8 @@ describe("validateUsername", () => {
 
 describe("JWT round-trip", () => {
   beforeAll(() => {
-    process.env.JWT_SECRET = "test-secret-for-vitest";
+    // Must satisfy the 32-char minimum the server now enforces.
+    process.env.JWT_SECRET = "test-secret-for-vitest-0123456789abcdef";
   });
 
   it("signs and verifies {playerId, username}", () => {

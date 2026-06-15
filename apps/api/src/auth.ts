@@ -23,18 +23,32 @@ declare module "fastify" {
   }
 }
 
+/** Minimum JWT secret length (chars) — a weak secret means forgeable tokens. */
+export const MIN_JWT_SECRET_LEN = 32;
+
 function jwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("JWT_SECRET must be set");
+  if (!secret || secret.length < MIN_JWT_SECRET_LEN) {
+    throw new Error(`JWT_SECRET must be set and at least ${MIN_JWT_SECRET_LEN} chars`);
+  }
   return secret;
 }
 
+/**
+ * Fail-fast guard called at boot: refuse to start with a blank/weak JWT secret
+ * (a weak HS256 secret is brute-forceable → token forgery → full impersonation).
+ */
+export function assertJwtSecretStrength(): void {
+  jwtSecret();
+}
+
 export function signToken(claims: PlayerClaims): string {
-  return jwt.sign(claims, jwtSecret(), { expiresIn: TOKEN_TTL });
+  return jwt.sign(claims, jwtSecret(), { algorithm: "HS256", expiresIn: TOKEN_TTL });
 }
 
 export function verifyToken(token: string): PlayerClaims {
-  const decoded = jwt.verify(token, jwtSecret());
+  // Pin the algorithm: never let a token's own header pick the verifier (H2).
+  const decoded = jwt.verify(token, jwtSecret(), { algorithms: ["HS256"] });
   if (
     typeof decoded !== "object" ||
     decoded === null ||

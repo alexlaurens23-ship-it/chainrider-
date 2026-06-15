@@ -49,10 +49,32 @@ function fakeRepo(opts: {
       created.push(p);
       return { id: "new-id", username: p.username };
     },
-    async recordLoginResult(_id, update) {
+    // Atomic in the real impl (Postgres `for update`); here it's one synchronous
+    // mutation (no await inside), which is atomic under JS's single-thread model —
+    // so concurrent failures accumulate instead of being lost (proves H1).
+    async registerLoginFailure(_id, now) {
+      const p = state.player;
+      if (!p) return { failedAttempts: 0, lockedUntil: null, lockoutCount: 0 };
+      const lockedMs = p.locked_until ? Date.parse(p.locked_until) : null;
+      const d = evaluateLogin(
+        { failedAttempts: p.failed_attempts, lockedUntil: lockedMs, lockoutCount: p.lockout_count ?? 0 },
+        false,
+        now,
+      );
+      if (d.kind !== "wrong") {
+        // Active-lock straggler — no change.
+        return { failedAttempts: p.failed_attempts, lockedUntil: lockedMs, lockoutCount: p.lockout_count ?? 0 };
+      }
+      p.failed_attempts = d.failedAttempts;
+      p.locked_until = d.lockedUntil ? new Date(d.lockedUntil).toISOString() : null;
+      p.lockout_count = d.lockoutCount;
+      return { failedAttempts: d.failedAttempts, lockedUntil: d.lockedUntil, lockoutCount: d.lockoutCount };
+    },
+    async recordLoginSuccess(_id) {
       if (state.player) {
-        state.player.failed_attempts = update.failedAttempts;
-        state.player.locked_until = update.lockedUntil;
+        state.player.failed_attempts = 0;
+        state.player.locked_until = null;
+        state.player.lockout_count = 0;
       }
     },
   };
@@ -195,6 +217,7 @@ describe("performLogin (end-to-end with a fake repo + injected time)", () => {
       banned: false,
       failed_attempts: 0,
       locked_until: null,
+      lockout_count: 0,
     };
   }
 
@@ -242,5 +265,47 @@ describe("performLogin (end-to-end with a fake repo + injected time)", () => {
     const res = await performLogin(repo, { username: "rider_1", pin: "1234" }, 1);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(403);
+  });
+
+  it("H1: the lockout holds under CONCURRENT wrong-PIN attempts (no lost updates)", async () => {
+    const repo = fakeRepo({ player: await makePlayer() });
+    const now = 9_000_000;
+
+    // Fire many wrong-PIN logins at once — they all read the same unlocked
+    // snapshot, then each hands its increment to the atomic registerLoginFailure.
+    // With a lost-update (read-modify-write in performLogin) design these would
+    // mostly write "1" and never lock; with the atomic increment they accumulate.
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => performLogin(repo, { username: "rider_1", pin: "9999" }, now)),
+    );
+    expect(results.every((r) => !r.ok)).toBe(true);
+
+    // The account is genuinely locked (the counter was not lost).
+    expect(repo.player?.locked_until).not.toBeNull();
+    const blocked = await performLogin(repo, { username: "rider_1", pin: "1234" }, now + 1000);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.status).toBe(423);
+  });
+
+  it("M6: consecutive lockouts escalate (15m → 30m → …) instead of resetting flat", async () => {
+    const repo = fakeRepo({ player: await makePlayer() });
+    let now = 1_000_000;
+
+    const lockOnce = async (): Promise<number> => {
+      for (let i = 0; i < LOCK_MAX_FAILS; i++) {
+        await performLogin(repo, { username: "rider_1", pin: "9999" }, now);
+      }
+      const lockedUntil = Date.parse(repo.player!.locked_until!);
+      const duration = lockedUntil - now;
+      now = lockedUntil + 1; // jump past the lock to trigger the next one
+      return duration;
+    };
+
+    const first = await lockOnce();
+    const second = await lockOnce();
+    const third = await lockOnce();
+    expect(first).toBe(LOCK_MS); // 15 min
+    expect(second).toBe(LOCK_MS * 2); // 30 min
+    expect(third).toBe(LOCK_MS * 4); // 60 min
   });
 });

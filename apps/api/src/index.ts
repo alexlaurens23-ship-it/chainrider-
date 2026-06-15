@@ -1,6 +1,7 @@
 import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { assertJwtSecretStrength } from "./auth.js";
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { leaderboardsRoutes } from "./routes/leaderboards.js";
@@ -13,6 +14,9 @@ import { mapsRoutes, tracksRoutes } from "./routes/tracks.js";
 const PORT = 8787;
 
 async function main(): Promise<void> {
+  // Refuse to boot with a blank/weak JWT secret (H2).
+  assertJwtSecretStrength();
+
   const app = Fastify({ logger: true });
 
   await app.register(cors, { origin: true });

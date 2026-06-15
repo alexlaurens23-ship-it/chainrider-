@@ -15,8 +15,10 @@ import { validateUsername } from "./auth.js";
 const BCRYPT_ROUNDS = 10;
 /** Consecutive wrong PINs before an account locks. */
 export const LOCK_MAX_FAILS = 5;
-/** Lockout duration once tripped. */
+/** Base lockout duration; doubles per consecutive lockout (see evaluateLogin). */
 export const LOCK_MS = 15 * 60 * 1000;
+/** Cap the escalation exponent so the lock can't grow unbounded (64× ≈ 16h). */
+export const LOCK_ESCALATION_CAP = 6;
 
 // ── Validation ───────────────────────────────────────────────────────────────
 
@@ -53,23 +55,34 @@ export interface LockState {
   failedAttempts: number;
   /** Epoch ms the lock lifts, or null if not locked. */
   lockedUntil: number | null;
+  /** Consecutive lockouts (drives escalating backoff); resets on success. */
+  lockoutCount?: number;
 }
 
 export type LoginDecision =
   | { kind: "locked"; retryMs: number }
   | { kind: "success" }
-  | { kind: "wrong"; failedAttempts: number; lockedUntil: number | null; attemptsLeft: number };
+  | {
+      kind: "wrong";
+      failedAttempts: number;
+      lockedUntil: number | null;
+      lockoutCount: number;
+      attemptsLeft: number;
+    };
 
 /**
- * Given the stored lock state, whether the PIN matched, and `now`, decide the
- * outcome and the new counters. An EXPIRED lock clears to zero before judging,
- * so a correct PIN after the window succeeds; an ACTIVE lock rejects even a
- * correct PIN (locked means locked). Injecting `now` makes unlock testable
- * without waiting 15 minutes.
+ * Reference implementation of the lockout state machine — the SQL function
+ * `cr_register_login_failure` (sql/006) MUST mirror this math. Given the stored
+ * state, whether the PIN matched, and `now`, decide the outcome and the new
+ * counters. An EXPIRED lock clears the in-window counter before judging; an
+ * ACTIVE lock rejects even a correct PIN. Each consecutive lockout DOUBLES the
+ * duration (15m → 30m → 60m …, capped) instead of resetting flat, to blunt the
+ * 4-digit-PIN guess rate. Injecting `now` makes escalation/unlock testable.
  */
 export function evaluateLogin(state: LockState, pinOk: boolean, now: number): LoginDecision {
   let failed = state.failedAttempts;
   let lockedUntil = state.lockedUntil;
+  let lockoutCount = state.lockoutCount ?? 0;
 
   if (lockedUntil !== null && lockedUntil <= now) {
     lockedUntil = null;
@@ -82,9 +95,17 @@ export function evaluateLogin(state: LockState, pinOk: boolean, now: number): Lo
 
   failed += 1;
   if (failed >= LOCK_MAX_FAILS) {
-    return { kind: "wrong", failedAttempts: failed, lockedUntil: now + LOCK_MS, attemptsLeft: 0 };
+    lockoutCount += 1;
+    const duration = LOCK_MS * 2 ** Math.min(lockoutCount - 1, LOCK_ESCALATION_CAP);
+    return { kind: "wrong", failedAttempts: 0, lockedUntil: now + duration, lockoutCount, attemptsLeft: 0 };
   }
-  return { kind: "wrong", failedAttempts: failed, lockedUntil: null, attemptsLeft: LOCK_MAX_FAILS - failed };
+  return {
+    kind: "wrong",
+    failedAttempts: failed,
+    lockedUntil: null,
+    lockoutCount,
+    attemptsLeft: LOCK_MAX_FAILS - failed,
+  };
 }
 
 // ── Repo (DB boundary; injected so the logic is testable with fakes) ─────────
@@ -96,14 +117,15 @@ export interface PlayerRow {
   banned: boolean;
   failed_attempts: number;
   locked_until: string | null;
+  lockout_count?: number;
 }
 
-export interface LoginResultUpdate {
+/** The post-increment lock state returned by the atomic failure registration. */
+export interface FailureState {
   failedAttempts: number;
-  /** ISO string or null. */
-  lockedUntil: string | null;
-  /** Stamp last_login_at on success. */
-  success: boolean;
+  /** Epoch ms the lock lifts, or null. */
+  lockedUntil: number | null;
+  lockoutCount: number;
 }
 
 export interface AccountRepo {
@@ -115,7 +137,15 @@ export interface AccountRepo {
     pinHash: string;
     walletAddress: string;
   }): Promise<{ id: string; username: string }>;
-  recordLoginResult(playerId: string, update: LoginResultUpdate): Promise<void>;
+  /**
+   * Atomically register one wrong-PIN attempt and return the new lock state.
+   * MUST be a single indivisible read-increment-write (H1) so concurrent
+   * failures can't lose updates and bypass the lockout. `now` is honored by the
+   * test fake; the Supabase impl uses DB `now()`.
+   */
+  registerLoginFailure(playerId: string, now: number): Promise<FailureState>;
+  /** Reset all lock counters on a successful login. */
+  recordLoginSuccess(playerId: string): Promise<void>;
 }
 
 // ── Signup ───────────────────────────────────────────────────────────────────
@@ -194,38 +224,29 @@ export async function performLogin(
   if (player.banned) return { ok: false, status: 403, error: "account banned" };
 
   const lockedUntil = player.locked_until ? new Date(player.locked_until).getTime() : null;
-  // Short-circuit an active lock without spending a bcrypt compare.
+  // Short-circuit an active lock without spending a bcrypt compare. (Advisory:
+  // the atomic failure registration below is the authoritative gate.)
   if (lockedUntil !== null && lockedUntil > now) {
     return { ok: false, status: 423, error: lockMessage(lockedUntil - now) };
   }
 
   const pinOk = await verifyPin(input.pin, player.pin_hash);
-  const decision = evaluateLogin(
-    { failedAttempts: player.failed_attempts ?? 0, lockedUntil },
-    pinOk,
-    now,
-  );
-
-  if (decision.kind === "success") {
-    await repo.recordLoginResult(player.id, { failedAttempts: 0, lockedUntil: null, success: true });
+  if (pinOk) {
+    await repo.recordLoginSuccess(player.id);
     return { ok: true, playerId: player.id, username: player.username };
   }
-  if (decision.kind === "locked") {
-    return { ok: false, status: 423, error: lockMessage(decision.retryMs) };
+
+  // Wrong PIN: hand the increment to an ATOMIC repo op (H1). We never compute the
+  // new counter from the stale read above — concurrent failures must not be lost.
+  const state = await repo.registerLoginFailure(player.id, now);
+  if (state.lockedUntil !== null && state.lockedUntil > now) {
+    return { ok: false, status: 423, error: lockMessage(state.lockedUntil - now) };
   }
-  // wrong
-  await repo.recordLoginResult(player.id, {
-    failedAttempts: decision.failedAttempts,
-    lockedUntil: decision.lockedUntil ? new Date(decision.lockedUntil).toISOString() : null,
-    success: false,
-  });
-  if (decision.lockedUntil !== null) {
-    return { ok: false, status: 423, error: lockMessage(decision.lockedUntil - now) };
-  }
+  const attemptsLeft = Math.max(0, LOCK_MAX_FAILS - state.failedAttempts);
   return {
     ok: false,
     status: 401,
-    error: `wrong PIN — ${decision.attemptsLeft} attempt(s) left before lockout`,
+    error: `wrong PIN — ${attemptsLeft} attempt(s) left before lockout`,
   };
 }
 
@@ -234,10 +255,12 @@ export async function performLogin(
 export function createSupabaseAccountRepo(db: SupabaseClient): AccountRepo {
   return {
     async findByUsername(username) {
+      // Exact match on the stored (lowercased) username — NOT ilike, whose `_`
+      // wildcard would let underscores over-match other accounts (M5).
       const { data } = await db
         .from("cr_players")
-        .select("id, username, pin_hash, banned, failed_attempts, locked_until")
-        .ilike("username", username)
+        .select("id, username, pin_hash, banned, failed_attempts, locked_until, lockout_count")
+        .eq("username", username.toLowerCase())
         .maybeSingle();
       return (data as PlayerRow | null) ?? null;
     },
@@ -245,7 +268,7 @@ export function createSupabaseAccountRepo(db: SupabaseClient): AccountRepo {
       const { data } = await db
         .from("cr_players")
         .select("id")
-        .ilike("username", username)
+        .eq("username", username.toLowerCase())
         .maybeSingle();
       return Boolean(data);
     },
@@ -273,13 +296,31 @@ export function createSupabaseAccountRepo(db: SupabaseClient): AccountRepo {
       if (error || !data) throw error ?? new Error("insert failed");
       return { id: data.id as string, username: data.username as string };
     },
-    async recordLoginResult(playerId, update) {
-      const patch: Record<string, unknown> = {
-        failed_attempts: update.failedAttempts,
-        locked_until: update.lockedUntil,
+    async registerLoginFailure(playerId) {
+      // Atomic, row-locked increment+escalation in Postgres (sql/006). `now` is
+      // the DB's; the param is honored only by the test fake.
+      const { data, error } = await db.rpc("cr_register_login_failure", { p_id: playerId });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { failed_attempts: number; locked_until: string | null; lockout_count: number }
+        | undefined;
+      if (!row) throw new Error("login-failure registration returned no row");
+      return {
+        failedAttempts: row.failed_attempts,
+        lockedUntil: row.locked_until ? new Date(row.locked_until).getTime() : null,
+        lockoutCount: row.lockout_count,
       };
-      if (update.success) patch.last_login_at = new Date().toISOString();
-      await db.from("cr_players").update(patch).eq("id", playerId);
+    },
+    async recordLoginSuccess(playerId) {
+      await db
+        .from("cr_players")
+        .update({
+          failed_attempts: 0,
+          locked_until: null,
+          lockout_count: 0,
+          last_login_at: new Date().toISOString(),
+        })
+        .eq("id", playerId);
     },
   };
 }
