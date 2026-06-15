@@ -961,6 +961,39 @@
         border-radius: 4px;
         margin-left: 6px;
       }
+      /* Skin picker (P5) */
+      .skin-picker {
+        display: inline-flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .skin-swatch {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        cursor: pointer;
+        padding: 0;
+        transition: transform 0.1s ease, border-color 0.1s ease;
+      }
+      .skin-swatch:hover {
+        transform: scale(1.12);
+      }
+      .skin-swatch.active {
+        border-color: #fff;
+      }
+      .rc-skins {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        justify-content: center;
+        margin: 12px 0 4px;
+      }
+      .rc-skins-label {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        color: #9fb4c8;
+      }
       .my-rank {
         color: #9fb4c8;
         font-size: 13px;

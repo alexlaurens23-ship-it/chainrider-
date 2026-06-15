@@ -7,8 +7,12 @@ import {
   stepSim,
 } from "@chainrider/physics";
 import type { BikeTune, InputLogEntry, Sim, SimSnapshot, TrackPoint } from "@chainrider/physics";
+import { prefersReducedMotion } from "../skins";
 
 const MAX_FRAME_S = 0.25;
+/** Crash slow-mo (cosmetic real-time pacing — the tick stream + input log are unchanged). */
+const SLOWMO_MS = 500;
+const SLOWMO_SCALE = 0.4;
 /** 20 minutes at 60 Hz — the run is force-ended past this. */
 export const MAX_RIDE_TICKS = 20 * 60 * 60;
 
@@ -20,6 +24,8 @@ export interface RideFrame {
   speed: number;
   /** Seconds of the current airborne streak. */
   airSeconds: number;
+  /** Live input bitmask (rider lean — cosmetic). */
+  mask: number;
 }
 
 export interface RideEnd {
@@ -69,6 +75,8 @@ export function createRideLoop(
 
   let last = performance.now();
   let accumulator = 0;
+  let slowmoUntil = 0;
+  const reduceMotion = prefersReducedMotion();
 
   function rebuild(): void {
     sim = createSim(options.points, tune, { parTimeMs: options.parTimeMs });
@@ -79,6 +87,7 @@ export function createRideLoop(
     maxCombo = 1;
     airTicks = 0;
     accumulator = 0;
+    slowmoUntil = 0;
     last = performance.now();
   }
 
@@ -94,6 +103,9 @@ export function createRideLoop(
     let frameTime = (now - last) / 1000;
     last = now;
     if (frameTime > MAX_FRAME_S) frameTime = MAX_FRAME_S;
+    // Crash slow-mo: scale real time only (the SIM_DT tick stream is untouched, so
+    // the recorded input log + replayed score are identical). Disabled if reduced.
+    if (!reduceMotion && now < slowmoUntil) frameTime *= SLOWMO_SCALE;
     accumulator += frameTime;
 
     while (accumulator >= SIM_DT) {
@@ -103,9 +115,11 @@ export function createRideLoop(
         log.push([sim.tick, mask]);
         lastMask = mask;
       }
+      const wasCrashed = curr.crashed;
       stepSim(sim, mask);
       curr = getSnapshot(sim);
       accumulator -= SIM_DT;
+      if (!wasCrashed && curr.crashed) slowmoUntil = now + SLOWMO_MS;
 
       if (curr.combo > maxCombo) maxCombo = curr.combo;
       airTicks = curr.grounded ? 0 : airTicks + 1;
@@ -118,7 +132,7 @@ export function createRideLoop(
     }
 
     const speed = (curr.chassis.x - prev.chassis.x) / SIM_DT;
-    options.onFrame({ prev, curr, alpha: accumulator / SIM_DT, speed, airSeconds: airTicks * SIM_DT });
+    options.onFrame({ prev, curr, alpha: accumulator / SIM_DT, speed, airSeconds: airTicks * SIM_DT, mask: lastMask });
 
     if (curr.finished || sim.tick >= MAX_RIDE_TICKS) {
       end();

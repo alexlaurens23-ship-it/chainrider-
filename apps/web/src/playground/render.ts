@@ -1,5 +1,7 @@
 import type { BikeTune, SimSnapshot, TrackInfo } from "@chainrider/physics";
 import { drawBike } from "../shared/bike";
+import type { Trail } from "../shared/trail";
+import { getActiveSkin } from "../skins";
 
 const PX_PER_METER = 26;
 /** Camera leads the bike a little in the riding direction. */
@@ -16,6 +18,10 @@ export interface RenderView {
   /** accumulator / SIM_DT, 0..1 — interpolation between the two snapshots. */
   alpha: number;
   tune: BikeTune;
+  /** Live input bitmask (rider lean — cosmetic). */
+  mask: number;
+  /** Shared rear-wheel light trail (the loop owns + pushes it). */
+  trail: Trail;
 }
 
 export function render(
@@ -24,7 +30,8 @@ export function render(
   cssHeight: number,
   view: RenderView,
 ): void {
-  const { track, prev, curr, alpha, tune } = view;
+  const { track, prev, curr, alpha, tune, mask, trail } = view;
+  const skin = getActiveSkin();
 
   const camX = lerp(prev.chassis.x, curr.chassis.x, alpha) + CAMERA_LOOKAHEAD_M;
   const camY = lerp(prev.chassis.y, curr.chassis.y, alpha);
@@ -89,6 +96,7 @@ export function render(
     ctx.stroke();
   }
 
-  // Bike — interpolated poses (shared with the ride screen).
-  drawBike(ctx, { toX, toY, scale: PX_PER_METER, prev, curr, alpha, tune });
+  // Trail + bike — interpolated poses (shared with the ride screen).
+  trail.draw(ctx, toX, toY, skin.trail);
+  drawBike(ctx, { toX, toY, scale: PX_PER_METER, prev, curr, alpha, tune, skin, inputMask: mask });
 }

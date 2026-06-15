@@ -1,5 +1,6 @@
 import { getToken } from "../auth";
 import type { SubmitRunResult } from "../net";
+import { createSkinPicker } from "../skins";
 import { formatClock, formatScore } from "../ui/format";
 
 /** Score as a fraction of the track's max earns stars at these cutoffs. */
@@ -71,6 +72,7 @@ export function showRunComplete(
         <div class="cell"><span class="k">Status</span><span class="v">${summary.finished ? "FINISHED" : "QUIT"}</span></div>
       </div>
       <div class="rc-status" id="rc-status">Saving run…</div>
+      <div class="rc-skins"><span class="rc-skins-label">SKIN</span><div id="rc-skin"></div></div>
       <div class="rc-buttons">
         <button class="btn-secondary" id="rc-retry">Retry</button>
         <button class="btn-secondary" id="rc-new">New Track</button>
@@ -78,6 +80,7 @@ export function showRunComplete(
     </div>
   `;
   root.appendChild(overlay);
+  overlay.querySelector<HTMLDivElement>("#rc-skin")!.appendChild(createSkinPicker());
 
   overlay.querySelector<HTMLButtonElement>("#rc-retry")!.addEventListener("click", handlers.onRetry);
   overlay.querySelector<HTMLButtonElement>("#rc-new")!.addEventListener("click", handlers.onNewTrack);

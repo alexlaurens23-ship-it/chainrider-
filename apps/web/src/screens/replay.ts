@@ -111,6 +111,7 @@ export function createReplayScreen(): Screen {
             f.alpha,
             f.speed,
             loop!.tune,
+            f.mask,
           );
           hud.update(f.curr, f.airSeconds, true);
         },

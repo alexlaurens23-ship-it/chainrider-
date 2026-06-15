@@ -12,6 +12,7 @@ import {
   type TrackSummary,
 } from "../net";
 import { isLoggedIn, requireLogin } from "../auth";
+import { createSkinPicker } from "../skins";
 import type { Screen } from "../router";
 import { drawChartPreview } from "../ui/chartPreview";
 import { formatClock, formatScore, formatSol, tierColor } from "../ui/format";
@@ -107,8 +108,10 @@ export function createMapDetailScreen(): Screen {
       <div style="margin-top:24px">
         <button class="btn-primary" id="ride-btn">RIDE THIS CHART ▸</button>
         <div class="ride-hint" id="ride-hint">${isLoggedIn() ? "" : "Log in to ride & win SOL"}</div>
+        <div class="rc-skins" style="margin-top:14px"><span class="rc-skins-label">BIKE SKIN</span><div id="md-skin"></div></div>
       </div>
     `;
+    detail.querySelector<HTMLDivElement>("#md-skin")!.appendChild(createSkinPicker());
 
     for (const tab of detail.querySelectorAll<HTMLButtonElement>(".tab")) {
       tab.addEventListener("click", () => {

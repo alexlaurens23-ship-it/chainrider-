@@ -1,5 +1,6 @@
 import { DEFAULT_TUNE, SIM_DT, createSim, getSnapshot, getTrackInfo, stepSim } from "@chainrider/physics";
 import type { BikeTune, InputLogEntry, Sim, SimSnapshot, TrackInfo } from "@chainrider/physics";
+import { createTrail } from "../shared/trail";
 import { createHud } from "./hud";
 import { createInput } from "./input";
 import { createPanel } from "./panel";
@@ -43,12 +44,14 @@ export function startPlayground(root: HTMLElement): PlaygroundHandle {
   const input = createInput();
   const hud = createHud(root);
   const selfTest = createSelfTest(root);
+  const trail = createTrail();
 
   function rebuild(): void {
     sim = createSim(TEST_TRACK, tune);
     trackInfo = getTrackInfo(sim);
     prev = getSnapshot(sim);
     curr = prev;
+    trail.clear();
     if (recording) {
       recording = null;
       selfTest.cancel();
@@ -108,14 +111,20 @@ export function startPlayground(root: HTMLElement): PlaygroundHandle {
       }
     }
 
+    const alpha = accumulator / SIM_DT;
+    const lerp = (a: number, b: number): number => a + (b - a) * alpha;
+    if (!curr.crashed) trail.push(lerp(prev.rearWheel.x, curr.rearWheel.x), lerp(prev.rearWheel.y, curr.rearWheel.y));
+
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     render(ctx, window.innerWidth, window.innerHeight, {
       track: trackInfo,
       prev,
       curr,
-      alpha: accumulator / SIM_DT,
+      alpha,
       tune,
+      mask: input.mask(),
+      trail,
     });
     hud.update(curr, fps);
 

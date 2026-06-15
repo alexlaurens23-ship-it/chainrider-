@@ -1,8 +1,23 @@
 import { terrainYAt } from "@chainrider/physics";
 import type { BikeTune, SimSnapshot, TrackInfo } from "@chainrider/physics";
 import { drawBike } from "../shared/bike";
+import { createTrail } from "../shared/trail";
+import { getActiveSkin, prefersReducedMotion } from "../skins";
 import { CHART_UP, segmentColor, visibleRange } from "./chart";
 import { MINIMAP_H, MINIMAP_W } from "./hud";
+
+const SHAKE_MS = 250;
+const SHAKE_PX = 9;
+const CRASH_PARTICLES = 10;
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+}
 
 const BASE_PX_PER_M = 26;
 const MIN_ZOOM = 0.8; // zoomed out at speed
@@ -28,8 +43,10 @@ export interface RideRenderer {
     alpha: number,
     speed: number,
     tune: BikeTune,
+    /** Live input bitmask for the rider lean (cosmetic). */
+    mask: number,
   ): void;
-  /** Reset camera smoothing (on respawn). */
+  /** Reset camera smoothing + effects (on respawn). */
   reset(spawnX: number, spawnY: number): void;
 }
 
@@ -52,14 +69,43 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
   }
   const bakedMinimap = bakeMinimap(terrain, minX, maxX, minY, maxY);
 
+  // ── Cosmetic effect state (render-only) ──────────────────────────────────
+  const trail = createTrail();
+  let particles: Particle[] = [];
+  let shakeUntil = 0;
+  let lastNow = performance.now();
+  let lastFlips = 0;
+  let lastCombo = 1;
+  let lastCrashed = false;
+  const reduceMotion = prefersReducedMotion();
+
+  function spawnCrashBurst(wx: number, wy: number): void {
+    for (let i = 0; i < CRASH_PARTICLES; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 2 + Math.random() * 5;
+      const life = 0.35 + Math.random() * 0.35;
+      particles.push({ x: wx, y: wy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 2, life, maxLife: life });
+    }
+  }
+
   return {
     reset(spawnX, spawnY) {
       camX = spawnX;
       camY = spawnY;
       zoom = 1;
+      trail.clear();
+      particles = [];
+      shakeUntil = 0;
+      lastFlips = 0;
+      lastCombo = 1;
+      lastCrashed = false;
     },
 
-    render(ctx, w, h, prev, curr, alpha, speed, tune) {
+    render(ctx, w, h, prev, curr, alpha, speed, tune, mask) {
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastNow) / 1000);
+      lastNow = now;
+      const skin = getActiveSkin();
       const chassisX = lerp(prev.chassis.x, curr.chassis.x, alpha);
       const chassisY = lerp(prev.chassis.y, curr.chassis.y, alpha);
 
@@ -78,8 +124,38 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       const toX = (wx: number): number => (wx - camX) * pxPerM + w / 2;
       const toY = (wy: number): number => h / 2 - (wy - camY) * pxPerM;
 
+      // ── Effects: trail, crash burst/shake, combo pulse ──────────────────
+      const rearX = lerp(prev.rearWheel.x, curr.rearWheel.x, alpha);
+      const rearY = lerp(prev.rearWheel.y, curr.rearWheel.y, alpha);
+      if (!curr.crashed) trail.push(rearX, rearY);
+      if (curr.flips > lastFlips || curr.combo > lastCombo) trail.pulse();
+      if (!lastCrashed && curr.crashed) {
+        spawnCrashBurst(chassisX, chassisY);
+        if (!reduceMotion) shakeUntil = now + SHAKE_MS;
+      }
+      lastFlips = curr.flips;
+      lastCombo = curr.combo;
+      lastCrashed = curr.crashed;
+      // Advance particles (real-time; cosmetic).
+      for (const p of particles) {
+        p.life -= dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy -= 10 * dt; // gravity (world +y up)
+      }
+      particles = particles.filter((p) => p.life > 0);
+
       ctx.fillStyle = "#05060a";
       ctx.fillRect(0, 0, w, h);
+
+      // Screen shake wraps the world draw (skipped under reduced motion).
+      let shaken = false;
+      if (now < shakeUntil) {
+        const k = ((shakeUntil - now) / SHAKE_MS) * SHAKE_PX;
+        ctx.save();
+        ctx.translate((Math.random() - 0.5) * 2 * k, (Math.random() - 0.5) * 2 * k);
+        shaken = true;
+      }
 
       const camXMin = camX - w / 2 / pxPerM;
       const camXMax = camX + w / 2 / pxPerM;
@@ -88,11 +164,41 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       drawTerrain(ctx, h, toX, toY, terrain, camXMin, camXMax);
       drawMarkers(ctx, w, h, toX, toY, track, tune);
 
-      drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune });
+      trail.draw(ctx, toX, toY, skin.trail);
+      drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune, skin, inputMask: mask });
+      drawParticles(ctx, particles, toX, toY, pxPerM, skin.primary);
+
+      if (shaken) ctx.restore();
 
       drawMinimap(minimap, bakedMinimap, terrain, chassisX, minX, maxX, minY, maxY);
     },
   };
+}
+
+function drawParticles(
+  ctx: CanvasRenderingContext2D,
+  particles: Particle[],
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+  scale: number,
+  color: string,
+): void {
+  if (particles.length === 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.shadowColor = color;
+  for (const p of particles) {
+    const a = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = a;
+    ctx.shadowBlur = 8 * a;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(toX(p.x), toY(p.y), Math.max(1, 0.06 * scale * a), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
 }
 
 function drawTerrain(
