@@ -19,14 +19,14 @@ function tracks(n: number): PoolTrack[] {
 }
 
 describe("rankPool / prizeForRank", () => {
-  it("takes the top 20 by score and prices them 0.2 / 0.1×9 / 0.05×10 (sum 1.6)", () => {
+  it("takes the top 10 by score and prices them 0.2 / 0.1×4 / 0.05×5 (sum 0.85)", () => {
     const pool = rankPool(tracks(25), TIERS);
-    expect(pool).toHaveLength(20);
+    expect(pool).toHaveLength(10);
     expect(pool[0]).toMatchObject({ rank: 1, prizeSol: 0.2, trackId: 1 });
-    expect(pool.slice(1, 10).every((p) => p.prizeSol === 0.1)).toBe(true);
-    expect(pool.slice(10, 20).every((p) => p.prizeSol === 0.05)).toBe(true);
+    expect(pool.slice(1, 5).every((p) => p.prizeSol === 0.1)).toBe(true);
+    expect(pool.slice(5, 10).every((p) => p.prizeSol === 0.05)).toBe(true);
     const total = pool.reduce((s, p) => s + p.prizeSol, 0);
-    expect(total).toBeCloseTo(1.6, 9);
+    expect(total).toBeCloseTo(0.85, 9);
   });
 
   it("ranks by score DESC then id ASC; excludes ungraded tracks", () => {
@@ -44,14 +44,15 @@ describe("rankPool / prizeForRank", () => {
 
   it("prizeForRank falls off past the pool", () => {
     expect(prizeForRank(1, TIERS)).toBe(0.2);
-    expect(prizeForRank(10, TIERS)).toBe(0.1);
-    expect(prizeForRank(20, TIERS)).toBe(0.05);
-    expect(prizeForRank(21, TIERS)).toBe(0);
+    expect(prizeForRank(5, TIERS)).toBe(0.1);
+    expect(prizeForRank(6, TIERS)).toBe(0.05);
+    expect(prizeForRank(10, TIERS)).toBe(0.05);
+    expect(prizeForRank(11, TIERS)).toBe(0);
   });
 });
 
 describe("computeWindowPayouts", () => {
-  const pool = rankPool(tracks(25), TIERS); // ids 1..20 in the pool
+  const pool = rankPool(tracks(25), TIERS); // ids 1..10 in the pool
 
   it("one winner per track = highest server_score (min runId breaks ties)", () => {
     const finishers: Finisher[] = [
@@ -78,9 +79,9 @@ describe("computeWindowPayouts", () => {
     expect(rows[0].track_id).toBe(5);
   });
 
-  it("a finisher on a NON-pool track (rank > 20) pays nothing", () => {
+  it("a finisher on a NON-pool track (rank > 10) pays nothing", () => {
     const rows = computeWindowPayouts(42, pool, [
-      { trackId: 25, playerId: "z", runId: 1, serverScore: 999 }, // id 25 is outside the top 20
+      { trackId: 25, playerId: "z", runId: 1, serverScore: 999 }, // id 25 is outside the top 10
     ]);
     expect(rows).toHaveLength(0);
   });
@@ -111,9 +112,9 @@ function fakeRepo(finishers: Finisher[]): PayoutRepo & { inserted: PayoutRow[]; 
 describe("closeWindow", () => {
   it("verified finishers on 3 paying tracks → 3 pending payouts at the right amounts", async () => {
     const repo = fakeRepo([
-      { trackId: 1, playerId: "a", runId: 1, serverScore: 9000 },
-      { trackId: 2, playerId: "b", runId: 2, serverScore: 8000 },
-      { trackId: 11, playerId: "c", runId: 3, serverScore: 7000 },
+      { trackId: 1, playerId: "a", runId: 1, serverScore: 9000 }, // rank 1 → 0.2
+      { trackId: 2, playerId: "b", runId: 2, serverScore: 8000 }, // rank 2 → 0.1
+      { trackId: 6, playerId: "c", runId: 3, serverScore: 7000 }, // rank 6 → 0.05
     ]);
     const res = await closeWindow(repo, 100);
     expect(res.inserted).toBe(3);

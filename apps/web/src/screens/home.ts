@@ -30,14 +30,14 @@ export function createHomeScreen(): Screen {
           <div><div class="stat-num" id="rides">—</div><div class="stat-label">RIDES COMPLETED</div></div>
           <div><div class="stat-num" id="sol">—</div><div class="stat-label">TOTAL SOL PAID</div></div>
         </div>
+        <div class="section-title">TRENDING TRACKS</div>
+        <div class="card-grid" id="grid"><div class="empty-state">Loading tracks…</div></div>
         <div class="board-head">
-          <div class="section-title">PAYOUT BOARD · 20 PAYING TRACKS</div>
+          <div class="section-title">PAYOUT BOARD · 10 PAYING TRACKS</div>
           <div class="countdown"><span>WINDOW CLOSES IN</span> <span class="cd-time" id="cd">--:--</span></div>
         </div>
         <div id="payout-board"><div class="empty-state">Loading payout board…</div></div>
         <div class="board-foot"><a href="#/payouts">see who we've paid →</a></div>
-        <div class="section-title">TRENDING TRACKS</div>
-        <div class="card-grid" id="grid"><div class="empty-state">Loading tracks…</div></div>
       `;
       root.appendChild(page);
 

@@ -22,12 +22,17 @@ export interface PayoutTiers {
   rules: PayoutRule[];
 }
 
+/**
+ * Paying pool: the top-10 hardest RAW tracks (smooth is the chill mode and never
+ * pays). Prize by pool rank: 1 → 0.2, 2–5 → 0.1, 6–10 → 0.05 SOL (max 0.85/window).
+ * cr_config.payout_tiers is the live source of truth; this is the fallback.
+ */
 export const DEFAULT_PAYOUT_TIERS: PayoutTiers = {
-  poolSize: 20,
+  poolSize: 10,
   rules: [
     { maxRank: 1, sol: 0.2 },
-    { maxRank: 10, sol: 0.1 },
-    { maxRank: 20, sol: 0.05 },
+    { maxRank: 5, sol: 0.1 },
+    { maxRank: 10, sol: 0.05 },
   ],
 };
 
@@ -176,11 +181,13 @@ export function createSupabaseRepo(db: SupabaseClient): PayoutRepo {
       return (res.data?.value as PayoutTiers) ?? DEFAULT_PAYOUT_TIERS;
     },
     async fetchPoolTracks() {
-      // Order/limit happen in rankPool; fetch all graded active tracks.
+      // Order/limit happen in rankPool; fetch all graded active RAW tracks only
+      // (smooth never pays). The top-10 by difficulty_score become the pool.
       const res = await db
         .from("cr_tracks")
         .select("id,difficulty_score")
         .eq("active", true)
+        .eq("mode", "raw")
         .not("difficulty_score", "is", null);
       if (res.error) throw res.error;
       return (res.data ?? []) as PoolTrack[];

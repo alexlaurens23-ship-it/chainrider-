@@ -34,6 +34,7 @@ export const payoutPoolRoutes: FastifyPluginAsync = async (app) => {
       .from("cr_tracks")
       .select("id,tier,mode,difficulty_score,cr_maps(symbol,period)")
       .eq("active", true)
+      .eq("mode", "raw") // RAW-only paying pool; smooth never pays.
       .not("difficulty_score", "is", null)
       .order("difficulty_score", { ascending: false })
       .order("id", { ascending: true })
