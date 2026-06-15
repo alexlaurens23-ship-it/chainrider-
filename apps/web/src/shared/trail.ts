@@ -4,11 +4,11 @@
  * (newest = bright/wide → oldest = faint/thin). Cosmetic; cleared on respawn.
  */
 
-const MAX_POINTS = 48;
-const HEAD_WIDTH = 6; // px at the newest sample
-const HEAD_ALPHA = 0.8;
+const MAX_POINTS = 52;
+const HEAD_WIDTH = 11; // px at the newest sample — a thick light-wall tail
+const HEAD_ALPHA = 0.85;
 const PULSE_MS = 260; // combo/flip-land flash duration
-const PULSE_SCALE = 2; // width multiplier at the pulse peak
+const PULSE_SCALE = 1.8; // width multiplier at the pulse peak
 
 export interface Trail {
   /** Record one rear-wheel world position (call once per frame while riding). */
@@ -63,7 +63,7 @@ export function createTrail(): Trail {
         const t = 1 - i / pts.length; // 1 at head → ~0 at tail
         ctx.lineWidth = Math.max(0.5, HEAD_WIDTH * t * widthMul);
         ctx.strokeStyle = rgba(color, HEAD_ALPHA * t);
-        ctx.shadowBlur = 10 * t;
+        ctx.shadowBlur = 14 * t;
         ctx.beginPath();
         ctx.moveTo(toX(pts[i - 1].x), toY(pts[i - 1].y));
         ctx.lineTo(toX(pts[i].x), toY(pts[i].y));
