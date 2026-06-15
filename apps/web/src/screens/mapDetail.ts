@@ -8,6 +8,7 @@ import {
   type Tier,
   type TrackSummary,
 } from "../net";
+import { isLoggedIn, requireLogin } from "../auth";
 import type { Screen } from "../router";
 import { drawChartPreview } from "../ui/chartPreview";
 import { formatClock, formatScore, formatSol, tierColor } from "../ui/format";
@@ -96,6 +97,7 @@ export function createMapDetailScreen(): Screen {
       <div id="board"></div>
       <div style="margin-top:24px">
         <button class="btn-primary" id="ride-btn">RIDE THIS CHART ▸</button>
+        <div class="ride-hint" id="ride-hint">${isLoggedIn() ? "" : "Log in to ride & win SOL"}</div>
       </div>
     `;
 
@@ -131,7 +133,12 @@ export function createMapDetailScreen(): Screen {
       if (summary) {
         rideBtn.disabled = false;
         rideBtn.onclick = () => {
-          location.hash = `#/ride/${summary.trackId}`;
+          // Browsing is free; riding needs an account. If logged out, the modal
+          // opens and we continue into the ride on successful login.
+          const target = `#/ride/${summary.trackId}`;
+          requireLogin(() => {
+            location.hash = target;
+          });
         };
       } else {
         rideBtn.disabled = true;

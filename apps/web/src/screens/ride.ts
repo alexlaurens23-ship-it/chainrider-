@@ -1,5 +1,6 @@
 import { SIM_VERSION, createSim, getSnapshot, getTrackInfo } from "@chainrider/physics";
 import type { TrackInfo } from "@chainrider/physics";
+import { isLoggedIn, requireLogin } from "../auth";
 import { getStats, getTrackCached, submitRun, type TrackResponse } from "../net";
 import type { Screen } from "../router";
 import { createRideInput } from "../ride/input";
@@ -26,6 +27,26 @@ export function createRideScreen(): Screen {
         return;
       }
 
+      // Riding requires an account (a deep-link here while logged out is gated
+      // too — not just the RIDE button). Browsing the rest of the site is free.
+      if (!isLoggedIn()) {
+        root.innerHTML = `<div class="page">
+          <div class="topnav"><a href="#/">← HOME</a></div>
+          <div class="empty-state">Log in to ride this chart and compete for SOL.<br/><br/>
+            <button class="btn-primary" id="gate-login">Log In / Sign Up</button>
+          </div></div>`;
+        const gate = (): void =>
+          requireLogin(() => {
+            root.replaceChildren();
+            proceed();
+          });
+        root.querySelector<HTMLButtonElement>("#gate-login")?.addEventListener("click", gate);
+        gate(); // open the modal immediately; the placeholder stays if cancelled
+        return;
+      }
+      proceed();
+
+      function proceed(): void {
       const canvas = document.createElement("canvas");
       canvas.className = "game-canvas";
       root.appendChild(canvas);
@@ -57,6 +78,7 @@ export function createRideScreen(): Screen {
         .catch(() => {
           root.innerHTML = `<div class="page"><div class="topnav"><a href="#/">← HOME</a></div><div class="empty-state">Could not load track ${trackId}.</div></div>`;
         });
+      }
     },
 
     unmount() {

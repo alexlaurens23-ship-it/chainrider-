@@ -25,6 +25,40 @@ function clearSession(): void {
   localStorage.removeItem(NAME_KEY);
 }
 
+/** Decode a JWT's `exp` (seconds) and report whether it's past. Malformed → expired. */
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1])) as { exp?: number };
+    return typeof payload.exp === "number" && Date.now() >= payload.exp * 1000;
+  } catch {
+    return true;
+  }
+}
+
+/** Logged in = a JWT that exists and hasn't expired. Expired tokens self-clear. */
+export function isLoggedIn(): boolean {
+  const token = getToken();
+  if (!token) return false;
+  if (isTokenExpired(token)) {
+    clearSession();
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Run `onSuccess` if already logged in; otherwise open the login modal and run
+ * it once the user logs in (or signs up). The gate for riding: browsing is free,
+ * riding/submitting needs an account.
+ */
+export function requireLogin(onSuccess: () => void): void {
+  if (isLoggedIn()) {
+    onSuccess();
+    return;
+  }
+  openLoginModal(onSuccess);
+}
+
 // ── Client-side pre-checks (server re-validates authoritatively) ─────────────
 
 function isValidWallet(addr: string): boolean {
@@ -46,7 +80,7 @@ let bar: HTMLElement | null = null;
 
 function render(): void {
   if (!bar) return;
-  const name = getUsername();
+  const name = isLoggedIn() ? getUsername() : null;
   if (name) {
     bar.innerHTML = `<span class="wb-name">@${name}</span><button class="wb-btn" id="wb-logout">Log Out</button>`;
     bar.querySelector<HTMLButtonElement>("#wb-logout")!.addEventListener("click", () => {
@@ -54,12 +88,22 @@ function render(): void {
       render();
     });
   } else {
+    // Value prop is visible to logged-out browsers: the reason to sign up.
     bar.innerHTML = `
+      <span class="wb-tagline">Log in to ride &amp; win SOL</span>
       <button class="wb-btn" id="wb-login">Log In</button>
       <button class="wb-btn wb-connect" id="wb-signup">Sign Up</button>`;
-    bar.querySelector<HTMLButtonElement>("#wb-login")!.addEventListener("click", openLoginModal);
-    bar.querySelector<HTMLButtonElement>("#wb-signup")!.addEventListener("click", openSignupModal);
+    bar.querySelector<HTMLButtonElement>("#wb-login")!.addEventListener("click", () => openLoginModal());
+    bar.querySelector<HTMLButtonElement>("#wb-signup")!.addEventListener("click", () => openSignupModal());
   }
+}
+
+/** The auth bar overlaps the in-game HUD/minimap — hide it during a ride. */
+function isRideRoute(): boolean {
+  return location.hash.startsWith("#/ride/");
+}
+function updateBarVisibility(): void {
+  if (bar) bar.style.display = isRideRoute() ? "none" : "";
 }
 
 function modalShell(inner: string): { overlay: HTMLElement; close: () => void } {
@@ -72,7 +116,7 @@ function modalShell(inner: string): { overlay: HTMLElement; close: () => void } 
 
 // ── Login ────────────────────────────────────────────────────────────────────
 
-function openLoginModal(): void {
+function openLoginModal(onSuccess?: () => void): void {
   const { overlay, close } = modalShell(`
     <div class="modal-title">LOG IN</div>
     <div class="modal-sub">Username + your 4-digit PIN.</div>
@@ -83,7 +127,8 @@ function openLoginModal(): void {
     <div class="modal-buttons">
       <button class="btn-secondary" id="lg-cancel">Cancel</button>
       <button class="btn-primary" id="lg-submit">Log In</button>
-    </div>`);
+    </div>
+    <div class="modal-switch">No account? <a id="lg-to-signup">Sign Up</a></div>`);
 
   const user = overlay.querySelector<HTMLInputElement>("#lg-user")!;
   const pin = overlay.querySelector<HTMLInputElement>("#lg-pin")!;
@@ -105,6 +150,7 @@ function openLoginModal(): void {
       setSession(res.token, res.username);
       close();
       render();
+      onSuccess?.();
     } catch (err) {
       errorEl.textContent = errorText(err, "Login failed — try again.");
       submit.disabled = false;
@@ -117,11 +163,16 @@ function openLoginModal(): void {
     if (e.key === "Enter") void go();
   });
   overlay.querySelector<HTMLButtonElement>("#lg-cancel")!.addEventListener("click", close);
+  // Switch to signup, carrying the same post-auth continuation.
+  overlay.querySelector<HTMLAnchorElement>("#lg-to-signup")!.addEventListener("click", () => {
+    close();
+    openSignupModal(onSuccess);
+  });
 }
 
 // ── Signup (2 steps: form → review/confirm) ──────────────────────────────────
 
-function openSignupModal(): void {
+function openSignupModal(onSuccess?: () => void): void {
   const { overlay, close } = modalShell("");
   const card = overlay.querySelector<HTMLDivElement>(".modal-card")!;
 
@@ -143,7 +194,8 @@ function openSignupModal(): void {
       <div class="modal-buttons">
         <button class="btn-secondary" id="su-cancel">Cancel</button>
         <button class="btn-primary" id="su-next">Review →</button>
-      </div>`;
+      </div>
+      <div class="modal-switch">Have an account? <a id="su-to-login">Log In</a></div>`;
     const user = card.querySelector<HTMLInputElement>("#su-user")!;
     const pin = card.querySelector<HTMLInputElement>("#su-pin")!;
     const wallet = card.querySelector<HTMLInputElement>("#su-wallet")!;
@@ -158,6 +210,10 @@ function openSignupModal(): void {
     user.focus();
 
     card.querySelector<HTMLButtonElement>("#su-cancel")!.addEventListener("click", close);
+    card.querySelector<HTMLAnchorElement>("#su-to-login")!.addEventListener("click", () => {
+      close();
+      openLoginModal(onSuccess);
+    });
     card.querySelector<HTMLButtonElement>("#su-next")!.addEventListener("click", () => {
       const username = user.value.trim().toLowerCase();
       const pinVal = pin.value.trim();
@@ -227,6 +283,7 @@ function openSignupModal(): void {
         setSession(res.token, res.username);
         close();
         render();
+        onSuccess?.();
       } catch (err) {
         errorEl.textContent = errorText(err, "Could not create the account.");
         create.disabled = false;
@@ -244,8 +301,13 @@ function openSignupModal(): void {
  */
 export function mountWalletButton(): void {
   if (bar) return;
+  // Drop an expired JWT on load so a stale session shows as logged-out.
+  isLoggedIn();
   bar = document.createElement("div");
   bar.id = "wallet-bar";
   document.body.appendChild(bar);
   render();
+  updateBarVisibility();
+  // Reappear/disappear with the route (hidden only during a ride).
+  window.addEventListener("hashchange", updateBarVisibility);
 }
