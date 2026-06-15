@@ -1,3 +1,4 @@
+import net from "node:net";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FastifyInstance } from "fastify";
 import { getDb } from "./db.js";
@@ -257,6 +258,11 @@ export function startTelegramBot(app: FastifyInstance): void {
     app.log.info("telegram: disabled (TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_USER_ID not set)");
     return;
   }
+  // undici's happy-eyeballs aborts each connect attempt at 250ms by default,
+  // which is shorter than the TCP handshake to api.telegram.org on some routes
+  // (curl connects ~300ms; fetch then fails ETIMEDOUT). Raise it so getUpdates /
+  // sendMessage can connect. Global, but only widening the tolerance.
+  net.setDefaultAutoSelectFamilyAttemptTimeout(5000);
   app.log.info("telegram: payout bot started (single-instance only)");
   void pollLoop(app).catch((err) => app.log.error({ err }, "telegram: poll loop crashed"));
 }
