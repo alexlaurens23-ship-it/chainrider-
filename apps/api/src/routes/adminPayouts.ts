@@ -1,6 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getDb } from "../db.js";
 import { markPayoutPaid } from "../payoutOps.js";
+// DEV-ONLY (force-close tooling — see /windows/:id/close below; revert before launch).
+import { closeWindow, createSupabaseRepo } from "../payouts.js";
+import { notifyWindowClose } from "../telegram.js";
 
 /**
  * Owner payout admin (X-Admin-Key gated, separate from player JWT). Lists
@@ -177,6 +180,53 @@ export const adminPayoutsRoutes: FastifyPluginAsync = async (app) => {
     }
     return { ok: true };
   });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // DEV-ONLY — FORCE-CLOSE A WINDOW NOW. TEMPORARY testing tooling; REVERT THIS
+  // COMMIT BEFORE LAUNCH. Lets the owner close a window on demand to exercise the
+  // payout + Telegram flow without waiting for the :00/:30 cron boundary. It runs
+  // the SAME closeWindow() + notifyWindowClose the cron does (no new payout logic).
+  // GATED: inert (404) in production unless DEV_FORCE_CLOSE=1 is set in the env.
+  // ══════════════════════════════════════════════════════════════════════
+  app.post<{ Params: { id: string } }>(
+    "/windows/:id/close",
+    {
+      schema: {
+        params: { type: "object", required: ["id"], properties: { id: { type: "string", pattern: "^[0-9]+$" } } },
+      },
+    },
+    async (req, reply) => {
+      // Disabled unless explicitly opted in — production never ships this active.
+      if (process.env.DEV_FORCE_CLOSE !== "1") {
+        return reply.code(404).send({ error: "not found" });
+      }
+      const db = getDb();
+      const windowId = Number(req.params.id);
+      try {
+        const result = await closeWindow(createSupabaseRepo(db), windowId);
+        // Parity with the cron: a manual close also DMs the owner (silent if none).
+        if (result.inserted > 0) {
+          const { data: w } = await db
+            .from("cr_payout_windows")
+            .select("starts_at")
+            .eq("id", windowId)
+            .maybeSingle();
+          await notifyWindowClose(db, windowId, (w?.starts_at as string) ?? null, app.log).catch((err) =>
+            app.log.error({ err, windowId }, "force-close notify failed"),
+          );
+        }
+        return {
+          ok: true,
+          windowId: result.windowId,
+          inserted: result.inserted,
+          skippedAlreadyPaid: result.skippedAlreadyPaid,
+        };
+      } catch (err) {
+        app.log.error({ err, windowId: req.params.id }, "force-close window failed");
+        return reply.code(500).send({ error: "could not close window" });
+      }
+    },
+  );
 
   // ── Window history (totals + unpaid counts) ─────────────────────────────
   app.get("/windows", async (_req, reply) => {

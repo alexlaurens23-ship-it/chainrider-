@@ -338,6 +338,13 @@ export function getWindowHistory(): Promise<WindowHistoryRow[]> {
   return apiFetch<WindowHistoryRow[]>("/admin/windows");
 }
 
+/** TESTING ONLY (remove before launch): force-close a window now (runs closeWindow). */
+export function forceCloseWindow(
+  id: number,
+): Promise<{ ok: boolean; windowId: number; inserted: number; skippedAlreadyPaid: number }> {
+  return postJson(`/admin/windows/${id}/close`, {});
+}
+
 export function submitRun(payload: SubmitRunPayload): Promise<SubmitRunResult> {
   return apiFetch<SubmitRunResult>("/runs/submit", {
     method: "POST",

@@ -1,6 +1,7 @@
 import {
   ADMIN_KEY_STORAGE,
   approveRun,
+  forceCloseWindow,
   getFlaggedRuns,
   getPendingPayouts,
   getWindowHistory,
@@ -230,21 +231,45 @@ export function createAdminScreen(): Screen {
           return;
         }
         body.innerHTML = `<table class="leaderboard"><thead><tr>
-          <th>#</th><th>START (UTC)</th><th>STATUS</th><th>SOL</th><th>PENDING</th><th>PAID</th>
+          <th>#</th><th>START (UTC)</th><th>STATUS</th><th>SOL</th><th>PENDING</th><th>PAID</th><th></th>
         </tr></thead><tbody>${rows.map(windowRow).join("")}</tbody></table>`;
+        for (const w of rows) wireWindowRow(body, w);
       })
       .catch(handleErr(body));
   }
 
   function windowRow(w: WindowHistoryRow): string {
-    return `<tr>
+    // TESTING ONLY: open windows get a force-close button (remove before launch).
+    const action =
+      w.status === "open"
+        ? `<button class="btn-secondary close-now" data-id="${w.id}">CLOSE NOW</button>`
+        : "";
+    return `<tr id="win-${w.id}">
       <td>${w.id}</td>
       <td>${new Date(w.startsAt).toISOString().slice(5, 16).replace("T", " ")}</td>
       <td>${w.status}</td>
       <td>${formatSol(w.totalSol)}</td>
       <td>${w.pendingCount}</td>
       <td>${w.paidCount}</td>
+      <td>${action}</td>
     </tr>`;
+  }
+
+  function wireWindowRow(body: HTMLElement, w: WindowHistoryRow): void {
+    const btn = body.querySelector<HTMLButtonElement>(`#win-${w.id} .close-now`);
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "closing…";
+      try {
+        const res = await forceCloseWindow(w.id);
+        btn.textContent = `closed · +${res.inserted} payout(s)`;
+        loadWindows(body); // refresh statuses/totals
+      } catch {
+        btn.disabled = false;
+        btn.textContent = "CLOSE NOW (failed)";
+      }
+    });
   }
 
   function handleErr(body: HTMLElement) {
