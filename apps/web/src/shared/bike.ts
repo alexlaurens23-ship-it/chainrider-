@@ -2,21 +2,35 @@ import type { BikeTune, SimSnapshot } from "@chainrider/physics";
 import { SKINS, type Skin } from "../skins";
 
 /**
- * Image-sprite bike (P5.3). The bike body + rider + wheels are one transparent
- * PNG illustration drawn centred on the chassis position and rotated to the
- * chassis angle — so it leans / flips / tumbles exactly with the physics, same
- * as the old vector bike. Cosmetic only: reads the snapshot, never touches
- * physics. The glow trail stays code-drawn (in ride/render + playground), drawn
- * BEHIND this sprite. Shared by ride + playground.
+ * 3-piece hybrid sprite bike (P5.5). Frame+rider is one PNG drawn at the chassis
+ * pose; each wheel is its own PNG drawn at its OWN physics-body position +
+ * rotation. Because each wheel tracks its own body, the suspension gap between
+ * frame and wheels visibly flexes over bumps and the wheels spin with their
+ * rotation. On crash all three tumble with their bodies. Cosmetic only — reads
+ * the snapshot, never touches physics. The glow trail stays code-drawn (drawn
+ * BEHIND this, in ride/render + playground). Shared by ride + playground.
  */
 
-// ── Fit knobs (tune these to line the sprite's wheels up with the terrain) ──
-/** Sprite width in WORLD METRES (the size/scale knob). Larger = bigger bike. */
-const SPRITE_WIDTH_M = 2.8;
-/** Chassis-local horizontal nudge, metres (+ = forward / toward the front wheel). */
-const SPRITE_OFFSET_X = 0;
-/** Chassis-local vertical nudge, metres (+ = DOWN on screen — push it onto the terrain). */
-const SPRITE_OFFSET_Y = 0.18;
+// ── Fit knobs (tune to seat the bike on the terrain + level it) ─────────────
+/** Frame sprite width in WORLD METRES (frame scale). */
+const FRAME_WIDTH_M = 4.5;
+/** Frame nudge in CHASSIS-LOCAL metres (moves with the frame; +x fwd, +y down). */
+const FRAME_OFFSET_X = 0;
+const FRAME_OFFSET_Y = 0.18;
+/** Radians added to the frame's chassis rotation — level the frame on flat ground
+ *  (fixes the nose-up "wheelie" look if the art's baseline isn't horizontal). */
+const SPRITE_ROTATION_OFFSET = 0;
+
+/** Wheel sprite sizes in WORLD METRES (the square PNG's drawn diameter). Physics
+ *  wheel diameter is ~0.68 m (2 × wheelRadius 0.34); bump up for transparent
+ *  padding around the wheel in its square canvas so it sits on the terrain. */
+const FRONT_WHEEL_DIAMETER_M = 0.85;
+const REAR_WHEEL_DIAMETER_M = 0.85;
+/** Per-wheel SCREEN-space nudge (world metres) to centre the image on the hub. */
+const FRONT_WHEEL_OFFSET_X = 0;
+const FRONT_WHEEL_OFFSET_Y = 0;
+const REAR_WHEEL_OFFSET_X = 0;
+const REAR_WHEEL_OFFSET_Y = 0;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -31,9 +45,9 @@ export interface BikeView {
   curr: SimSnapshot;
   alpha: number;
   tune: BikeTune;
-  /** Active skin — picks the bike sprite (and the trail tint, used by the caller). */
+  /** Active skin — picks the bike sprite set (and the trail tint, used by the caller). */
   skin: Skin;
-  /** Live input bitmask. Unused by the sprite (it leans via the chassis), kept for the shared view shape. */
+  /** Live input bitmask. Unused by the sprite bike (it leans via the physics bodies). */
   inputMask: number;
 }
 
@@ -50,46 +64,68 @@ function getSprite(path: string): HTMLImageElement {
   return img;
 }
 
-/** Kick off loading every skin's sprite up front so the ride has it ready. */
+/** Kick off loading every skin's 3 pieces up front so the ride has them ready. */
 export function preloadBikeSprites(): void {
-  for (const s of SKINS) getSprite(s.sprite);
+  for (const s of SKINS) {
+    getSprite(s.sprites.frame);
+    getSprite(s.sprites.wheelFront);
+    getSprite(s.sprites.wheelRear);
+  }
 }
 
 function isReady(img: HTMLImageElement): boolean {
   return img.complete && img.naturalWidth > 0;
 }
 
+/** One wheel PNG at its physics-body position, rotated by its spin angle. */
+function drawWheel(
+  ctx: CanvasRenderingContext2D,
+  view: BikeView,
+  key: "rearWheel" | "frontWheel",
+  img: HTMLImageElement,
+  diameterM: number,
+  offXM: number,
+  offYM: number,
+): void {
+  if (!isReady(img)) return;
+  const { toX, toY, scale, prev, curr, alpha } = view;
+  const hx = toX(lerp(prev[key].x, curr[key].x, alpha));
+  const hy = toY(lerp(prev[key].y, curr[key].y, alpha));
+  // Screen rotation (toY flips y, so negate) — the wheel image spins with the body.
+  const a = -lerp(prev[key].angle, curr[key].angle, alpha);
+  const d = diameterM * scale;
+  ctx.save();
+  // Offset in screen space (pre-rotate) so alignment is stable as the wheel spins.
+  ctx.translate(hx + offXM * scale, hy + offYM * scale);
+  ctx.rotate(a);
+  ctx.drawImage(img, -d / 2, -d / 2, d, d);
+  ctx.restore();
+}
+
 /**
- * Draw the interpolated bike sprite at the chassis pose. If the image hasn't
- * decoded yet, skip the body for this frame (the trail still renders) — the
- * sprite is preloaded at startup so this is at most a few early frames.
+ * Draw the interpolated 3-piece bike. Wheels first, then the frame on top (its
+ * bodywork overlaps the wheel tops; the erased wheel areas show the wheels
+ * through). Any piece not yet decoded is skipped for that frame (all preloaded).
  */
 export function drawBike(ctx: CanvasRenderingContext2D, view: BikeView): void {
   const { toX, toY, scale, prev, curr, alpha, skin } = view;
+  const sprites = skin.sprites;
 
-  const img = getSprite(skin.sprite);
-  if (!isReady(img)) return;
+  drawWheel(ctx, view, "rearWheel", getSprite(sprites.wheelRear), REAR_WHEEL_DIAMETER_M, REAR_WHEEL_OFFSET_X, REAR_WHEEL_OFFSET_Y);
+  drawWheel(ctx, view, "frontWheel", getSprite(sprites.wheelFront), FRONT_WHEEL_DIAMETER_M, FRONT_WHEEL_OFFSET_X, FRONT_WHEEL_OFFSET_Y);
 
+  const frame = getSprite(sprites.frame);
+  if (!isReady(frame)) return;
   const cx = toX(lerp(prev.chassis.x, curr.chassis.x, alpha));
   const cy = toY(lerp(prev.chassis.y, curr.chassis.y, alpha));
-  // Screen rotation (y is flipped in toY, so negate the world angle — matches the
-  // old vector bike, so the sprite leans/flips/tumbles identically with the chassis).
-  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha);
-
-  const wPx = SPRITE_WIDTH_M * scale;
-  const hPx = wPx * (img.naturalHeight / img.naturalWidth);
-
+  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha) + SPRITE_ROTATION_OFFSET;
+  const wPx = FRAME_WIDTH_M * scale;
+  const hPx = wPx * (frame.naturalHeight / frame.naturalWidth);
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(cAngle);
-  // Centre the sprite on the chassis, then nudge by the local offsets (metres → px).
-  ctx.drawImage(
-    img,
-    -wPx / 2 + SPRITE_OFFSET_X * scale,
-    -hPx / 2 + SPRITE_OFFSET_Y * scale,
-    wPx,
-    hPx,
-  );
+  // Frame offsets in chassis-local (post-rotate) space — they move with the frame.
+  ctx.drawImage(frame, -wPx / 2 + FRAME_OFFSET_X * scale, -hPx / 2 + FRAME_OFFSET_Y * scale, wPx, hPx);
   ctx.restore();
 }
 
