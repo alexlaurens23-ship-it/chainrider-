@@ -11,26 +11,42 @@ import { SKINS, type Skin } from "../skins";
  * BEHIND this, in ride/render + playground). Shared by ride + playground.
  */
 
-// ── Fit knobs (tune to seat the bike on the terrain + level it) ─────────────
-/** Frame sprite width in WORLD METRES (frame scale). */
-const FRAME_WIDTH_M = 4.5;
-/** Frame nudge in CHASSIS-LOCAL metres (moves with the frame; +x fwd, +y down). */
-const FRAME_OFFSET_X = 0;
-const FRAME_OFFSET_Y = 0.18;
-/** Radians added to the frame's chassis rotation — level the frame on flat ground
- *  (fixes the nose-up "wheelie" look if the art's baseline isn't horizontal). */
-const SPRITE_ROTATION_OFFSET = 0;
+/**
+ * Fit knobs (tune to seat the bike on the terrain + level it). A MUTABLE object
+ * so the dev tuning panel (src/dev/bikeTunePanel.ts, toggled in-browser) can edit
+ * them LIVE while riding. drawBike reads it every frame. These defaults are the
+ * source of truth — once dialled in, bake the panel's COPY VALUES back here.
+ */
+export interface BikeSpriteTune {
+  /** Frame sprite width in WORLD METRES (frame scale). */
+  FRAME_WIDTH_M: number;
+  /** Frame nudge in CHASSIS-LOCAL metres (moves with the frame; +x fwd, +y down). */
+  FRAME_OFFSET_X: number;
+  FRAME_OFFSET_Y: number;
+  /** Radians added to the frame's chassis rotation — level it on flat ground. */
+  SPRITE_ROTATION_OFFSET: number;
+  /** Wheel sprite drawn diameters in WORLD METRES (physics ~0.68 m; bump for padding). */
+  FRONT_WHEEL_DIAMETER_M: number;
+  REAR_WHEEL_DIAMETER_M: number;
+  /** Per-wheel SCREEN-space nudge (world metres) to centre the image on the hub. */
+  FRONT_WHEEL_OFFSET_X: number;
+  FRONT_WHEEL_OFFSET_Y: number;
+  REAR_WHEEL_OFFSET_X: number;
+  REAR_WHEEL_OFFSET_Y: number;
+}
 
-/** Wheel sprite sizes in WORLD METRES (the square PNG's drawn diameter). Physics
- *  wheel diameter is ~0.68 m (2 × wheelRadius 0.34); bump up for transparent
- *  padding around the wheel in its square canvas so it sits on the terrain. */
-const FRONT_WHEEL_DIAMETER_M = 0.85;
-const REAR_WHEEL_DIAMETER_M = 0.85;
-/** Per-wheel SCREEN-space nudge (world metres) to centre the image on the hub. */
-const FRONT_WHEEL_OFFSET_X = 0;
-const FRONT_WHEEL_OFFSET_Y = 0;
-const REAR_WHEEL_OFFSET_X = 0;
-const REAR_WHEEL_OFFSET_Y = 0;
+export const BIKE_TUNE: BikeSpriteTune = {
+  FRAME_WIDTH_M: 4.5,
+  FRAME_OFFSET_X: 0,
+  FRAME_OFFSET_Y: 0.18,
+  SPRITE_ROTATION_OFFSET: 0,
+  FRONT_WHEEL_DIAMETER_M: 0.85,
+  REAR_WHEEL_DIAMETER_M: 0.85,
+  FRONT_WHEEL_OFFSET_X: 0,
+  FRONT_WHEEL_OFFSET_Y: 0,
+  REAR_WHEEL_OFFSET_X: 0,
+  REAR_WHEEL_OFFSET_Y: 0,
+};
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -111,21 +127,22 @@ export function drawBike(ctx: CanvasRenderingContext2D, view: BikeView): void {
   const { toX, toY, scale, prev, curr, alpha, skin } = view;
   const sprites = skin.sprites;
 
-  drawWheel(ctx, view, "rearWheel", getSprite(sprites.wheelRear), REAR_WHEEL_DIAMETER_M, REAR_WHEEL_OFFSET_X, REAR_WHEEL_OFFSET_Y);
-  drawWheel(ctx, view, "frontWheel", getSprite(sprites.wheelFront), FRONT_WHEEL_DIAMETER_M, FRONT_WHEEL_OFFSET_X, FRONT_WHEEL_OFFSET_Y);
+  const t = BIKE_TUNE;
+  drawWheel(ctx, view, "rearWheel", getSprite(sprites.wheelRear), t.REAR_WHEEL_DIAMETER_M, t.REAR_WHEEL_OFFSET_X, t.REAR_WHEEL_OFFSET_Y);
+  drawWheel(ctx, view, "frontWheel", getSprite(sprites.wheelFront), t.FRONT_WHEEL_DIAMETER_M, t.FRONT_WHEEL_OFFSET_X, t.FRONT_WHEEL_OFFSET_Y);
 
   const frame = getSprite(sprites.frame);
   if (!isReady(frame)) return;
   const cx = toX(lerp(prev.chassis.x, curr.chassis.x, alpha));
   const cy = toY(lerp(prev.chassis.y, curr.chassis.y, alpha));
-  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha) + SPRITE_ROTATION_OFFSET;
-  const wPx = FRAME_WIDTH_M * scale;
+  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha) + t.SPRITE_ROTATION_OFFSET;
+  const wPx = t.FRAME_WIDTH_M * scale;
   const hPx = wPx * (frame.naturalHeight / frame.naturalWidth);
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(cAngle);
   // Frame offsets in chassis-local (post-rotate) space — they move with the frame.
-  ctx.drawImage(frame, -wPx / 2 + FRAME_OFFSET_X * scale, -hPx / 2 + FRAME_OFFSET_Y * scale, wPx, hPx);
+  ctx.drawImage(frame, -wPx / 2 + t.FRAME_OFFSET_X * scale, -hPx / 2 + t.FRAME_OFFSET_Y * scale, wPx, hPx);
   ctx.restore();
 }
 
