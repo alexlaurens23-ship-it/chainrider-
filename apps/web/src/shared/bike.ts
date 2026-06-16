@@ -36,16 +36,16 @@ export interface BikeSpriteTune {
 }
 
 export const BIKE_TUNE: BikeSpriteTune = {
-  FRAME_WIDTH_M: 4.5,
-  FRAME_OFFSET_X: 0,
-  FRAME_OFFSET_Y: 0.18,
-  SPRITE_ROTATION_OFFSET: 0,
-  FRONT_WHEEL_DIAMETER_M: 0.85,
-  REAR_WHEEL_DIAMETER_M: 0.85,
-  FRONT_WHEEL_OFFSET_X: 0,
-  FRONT_WHEEL_OFFSET_Y: 0,
-  REAR_WHEEL_OFFSET_X: 0,
-  REAR_WHEEL_OFFSET_Y: 0,
+  FRAME_WIDTH_M: 2.35,
+  FRAME_OFFSET_X: -0.06,
+  FRAME_OFFSET_Y: -0.17,
+  SPRITE_ROTATION_OFFSET: -0.195,
+  FRONT_WHEEL_DIAMETER_M: 0.88,
+  REAR_WHEEL_DIAMETER_M: 0.88,
+  FRONT_WHEEL_OFFSET_X: 0.37,
+  FRONT_WHEEL_OFFSET_Y: -0.02,
+  REAR_WHEEL_OFFSET_X: -0.3,
+  REAR_WHEEL_OFFSET_Y: 0.02,
 };
 
 function lerp(a: number, b: number, t: number): number {
@@ -93,7 +93,14 @@ function isReady(img: HTMLImageElement): boolean {
   return img.complete && img.naturalWidth > 0;
 }
 
-/** One wheel PNG at its physics-body position, rotated by its spin angle. */
+/**
+ * One wheel PNG anchored to its OWN physics-body world position, rotated by its
+ * spin angle. The fine-align offset is applied in CHASSIS-LOCAL space (rotated by
+ * the bike's angle), so it stays attached at any rotation — flips/wheelies/slopes
+ * no longer drift the wheels off (at rest, chassisAngle≈0, so it's identical to
+ * the old screen-space offset → resting fit unchanged). The offset is NOT rotated
+ * by the wheel's own spin (that would orbit the hub).
+ */
 function drawWheel(
   ctx: CanvasRenderingContext2D,
   view: BikeView,
@@ -102,18 +109,23 @@ function drawWheel(
   diameterM: number,
   offXM: number,
   offYM: number,
+  chassisAngle: number,
 ): void {
   if (!isReady(img)) return;
   const { toX, toY, scale, prev, curr, alpha } = view;
-  const hx = toX(lerp(prev[key].x, curr[key].x, alpha));
+  const hx = toX(lerp(prev[key].x, curr[key].x, alpha)); // physics wheel body position
   const hy = toY(lerp(prev[key].y, curr[key].y, alpha));
   // Screen rotation (toY flips y, so negate) — the wheel image spins with the body.
-  const a = -lerp(prev[key].angle, curr[key].angle, alpha);
+  const spin = -lerp(prev[key].angle, curr[key].angle, alpha);
   const d = diameterM * scale;
+  // Rotate the align offset by the bike's chassis angle so it tracks orientation.
+  const ox = offXM * scale;
+  const oy = offYM * scale;
+  const ca = Math.cos(chassisAngle);
+  const sa = Math.sin(chassisAngle);
   ctx.save();
-  // Offset in screen space (pre-rotate) so alignment is stable as the wheel spins.
-  ctx.translate(hx + offXM * scale, hy + offYM * scale);
-  ctx.rotate(a);
+  ctx.translate(hx + ox * ca - oy * sa, hy + ox * sa + oy * ca);
+  ctx.rotate(spin);
   ctx.drawImage(img, -d / 2, -d / 2, d, d);
   ctx.restore();
 }
@@ -128,14 +140,18 @@ export function drawBike(ctx: CanvasRenderingContext2D, view: BikeView): void {
   const sprites = skin.sprites;
 
   const t = BIKE_TUNE;
-  drawWheel(ctx, view, "rearWheel", getSprite(sprites.wheelRear), t.REAR_WHEEL_DIAMETER_M, t.REAR_WHEEL_OFFSET_X, t.REAR_WHEEL_OFFSET_Y);
-  drawWheel(ctx, view, "frontWheel", getSprite(sprites.wheelFront), t.FRONT_WHEEL_DIAMETER_M, t.FRONT_WHEEL_OFFSET_X, t.FRONT_WHEEL_OFFSET_Y);
+  // The bike's screen rotation (toY flips y, so negate). Wheels anchor to their
+  // own bodies but rotate their align offset by this; the frame adds the art-level
+  // SPRITE_ROTATION_OFFSET on top.
+  const chassisAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha);
+  drawWheel(ctx, view, "rearWheel", getSprite(sprites.wheelRear), t.REAR_WHEEL_DIAMETER_M, t.REAR_WHEEL_OFFSET_X, t.REAR_WHEEL_OFFSET_Y, chassisAngle);
+  drawWheel(ctx, view, "frontWheel", getSprite(sprites.wheelFront), t.FRONT_WHEEL_DIAMETER_M, t.FRONT_WHEEL_OFFSET_X, t.FRONT_WHEEL_OFFSET_Y, chassisAngle);
 
   const frame = getSprite(sprites.frame);
   if (!isReady(frame)) return;
   const cx = toX(lerp(prev.chassis.x, curr.chassis.x, alpha));
   const cy = toY(lerp(prev.chassis.y, curr.chassis.y, alpha));
-  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha) + t.SPRITE_ROTATION_OFFSET;
+  const cAngle = chassisAngle + t.SPRITE_ROTATION_OFFSET;
   const wPx = t.FRAME_WIDTH_M * scale;
   const hPx = wPx * (frame.naturalHeight / frame.naturalWidth);
   ctx.save();
