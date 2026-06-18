@@ -961,6 +961,34 @@
         border-radius: 4px;
         margin-left: 6px;
       }
+      /* RIDE button in line with the tier row (P5.12) */
+      .tier-ride-row {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px 24px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .tier-ride-row .tier-group {
+        flex: 1 1 auto;
+      }
+      .tier-ride-row .ride-cta {
+        flex: 0 0 auto;
+        text-align: right;
+      }
+      .tier-ride-row .ride-cta .ride-hint {
+        margin-top: 4px;
+      }
+      @media (max-width: 560px) {
+        .tier-ride-row .ride-cta {
+          flex: 1 1 100%;
+          text-align: left;
+        }
+        .tier-ride-row .ride-cta .btn-primary {
+          width: 100%;
+        }
+      }
       /* Skin picker (P5) */
       .skin-picker {
         display: inline-flex;

@@ -88,8 +88,16 @@ export function createMapDetailScreen(): Screen {
       <h1 class="hero-title" style="font-size:38px">${map.symbol}</h1>
       <p class="hero-tagline">${map.name}</p>
       <div class="tabs">${periodTabs}</div>
-      <div class="control-label">DIFFICULTY TIER</div>
-      <div class="tier-toggle">${tierBtns}</div>
+      <div class="tier-ride-row">
+        <div class="tier-group">
+          <div class="control-label">DIFFICULTY TIER</div>
+          <div class="tier-toggle">${tierBtns}</div>
+        </div>
+        <div class="ride-cta">
+          <button class="btn-primary" id="ride-btn">RIDE THIS CHART ▸</button>
+          <div class="ride-hint" id="ride-hint">${isLoggedIn() ? "" : "Log in to ride & win SOL"}</div>
+        </div>
+      </div>
       <div class="control-label">TERRAIN MODE</div>
       <div class="mode-toggle">
         <button class="mode-btn" data-mode="raw">RAW</button>
@@ -106,9 +114,7 @@ export function createMapDetailScreen(): Screen {
       <div class="section-title">YOUR PBs</div>
       <div id="myboard"></div>
       <div style="margin-top:24px">
-        <button class="btn-primary" id="ride-btn">RIDE THIS CHART ▸</button>
-        <div class="ride-hint" id="ride-hint">${isLoggedIn() ? "" : "Log in to ride & win SOL"}</div>
-        <div class="rc-skins" style="margin-top:14px"><span class="rc-skins-label">BIKE SKIN</span><div id="md-skin"></div></div>
+        <div class="rc-skins"><span class="rc-skins-label">BIKE SKIN</span><div id="md-skin"></div></div>
       </div>
     `;
     detail.querySelector<HTMLDivElement>("#md-skin")!.appendChild(createSkinPicker());
