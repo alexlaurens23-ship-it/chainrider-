@@ -42,16 +42,16 @@ export interface BikeSpriteTune {
 // rings → wheel offsets ~0 since each ring sits on its physics hub). Re-dial with
 // the in-browser panel (toggle B / ?biketune=1), then bake the COPY VALUES here.
 export const BIKE_TUNE: BikeSpriteTune = {
-  FRAME_WIDTH_M: 2.0,
-  FRAME_OFFSET_X: 0,
-  FRAME_OFFSET_Y: 0,
-  SPRITE_ROTATION_OFFSET: 0,
-  FRONT_WHEEL_DIAMETER_M: 0.68,
-  REAR_WHEEL_DIAMETER_M: 0.68,
-  FRONT_WHEEL_OFFSET_X: 0,
-  FRONT_WHEEL_OFFSET_Y: 0,
-  REAR_WHEEL_OFFSET_X: 0,
-  REAR_WHEEL_OFFSET_Y: 0,
+  FRAME_WIDTH_M: 2,
+  FRAME_OFFSET_X: -0.06,
+  FRAME_OFFSET_Y: -0.39,
+  SPRITE_ROTATION_OFFSET: -0.14,
+  FRONT_WHEEL_DIAMETER_M: 0.84,
+  REAR_WHEEL_DIAMETER_M: 0.84,
+  FRONT_WHEEL_OFFSET_X: 0.11,
+  FRONT_WHEEL_OFFSET_Y: 0.07,
+  REAR_WHEEL_OFFSET_X: -0.05,
+  REAR_WHEEL_OFFSET_Y: 0.04,
 };
 
 function lerp(a: number, b: number, t: number): number {
