@@ -65,7 +65,7 @@ packages/
     test/{grounded,scoring,respawn,launch,reverse}.test.ts  Vitest (15): incline climb + hard-landing + bit-identical replay; anti-exploit; respawn clearance; launch assist; context-aware reverse (forward brake decelerates > coast; standstill S backs up >3m, capped; steep-V escape: reverses up out of a 45° valley, assist > no-assist control).
 apps/
   web/                        Vite + vanilla TS. Hash-routed SPA: #/ home, #/map/:slug/:period, #/ride/:trackId, #/playground.
-    vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787.
+    vite.config.ts            Dev server pinned to :5180 (strictPort) + /api proxy -> :8787; **P9.0: host:true + allowedHosts [.trycloudflare.com/.ngrok-free.app/localhost] for tunneling**. Frontend API base = `import.meta.env.VITE_API_BASE ?? "/api"` (relative; net.ts) — works behind a tunnel/same-origin. `src/vite-env.d.ts` types VITE_API_BASE (tsconfig types:[]).
     index.html                #app root + full <style> (palette, pages, ride HUD, run-complete card, #wallet-bar + username .modal).
     src/main.ts               mountWalletButton() (persistent, outside #app) + mounts the router into #app.
     src/auth.ts               Account UI (P6-rev/rev2): persistent #wallet-bar (logged-out: "Log in to ride & win SOL" tagline + Log In / Sign Up; logged-in: @user·Log Out) — HIDDEN on #/ride/* (hashchange listener) so it doesn't overlap the minimap. LOGIN + 2-step SIGN-UP modals (cross-linked, carry an onSuccess continuation). requireLogin(onSuccess)/isLoggedIn() gate riding (browsing is free); expired JWT self-clears on load (isTokenExpired). JWT+username in localStorage; getToken() is the Bearer source for net.ts. No Phantom/wallet-adapter (vanilla TS).

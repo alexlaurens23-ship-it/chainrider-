@@ -1,9 +1,11 @@
-// Thin typed wrapper over the CHAINRIDER api. In dev, Vite proxies /api to
-// http://localhost:8787; in production the api is served from the same origin.
+// Thin typed wrapper over the CHAINRIDER api. Defaults to the RELATIVE base
+// `/api` so the app works behind any origin (a Cloudflare/ngrok tunnel, prod
+// same-origin, or local dev where Vite proxies /api → http://localhost:8787).
+// Override with VITE_API_BASE only if the api lives on a different origin.
 import type { TrackPoint } from "@chainrider/physics";
 import { getToken } from "./auth";
 
-const API_BASE = "/api";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export class ApiError extends Error {
   constructor(
