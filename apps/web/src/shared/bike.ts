@@ -42,7 +42,7 @@ export interface BikeSpriteTune {
 // rings → wheel offsets ~0 since each ring sits on its physics hub). Re-dial with
 // the in-browser panel (toggle B / ?biketune=1), then bake the COPY VALUES here.
 export const BIKE_TUNE: BikeSpriteTune = {
-  FRAME_WIDTH_M: 2.6,
+  FRAME_WIDTH_M: 2.0,
   FRAME_OFFSET_X: 0,
   FRAME_OFFSET_Y: 0,
   SPRITE_ROTATION_OFFSET: 0,
@@ -75,12 +75,15 @@ export interface BikeView {
 
 // ── Sprite cache + preload (load once, never per frame) ─────────────────────
 const spriteCache = new Map<string, HTMLImageElement>();
+// Bump when the art files change so the browser fetches the new image instead of
+// a stale cached one (the public/ paths stay the same). Cached by bare path.
+const SPRITE_CACHE_BUST = "v8";
 
 function getSprite(path: string): HTMLImageElement {
   let img = spriteCache.get(path);
   if (!img) {
     img = new Image();
-    img.src = path;
+    img.src = `${path}?${SPRITE_CACHE_BUST}`;
     spriteCache.set(path, img);
   }
   return img;

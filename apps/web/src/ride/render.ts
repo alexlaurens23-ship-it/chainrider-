@@ -26,6 +26,74 @@ const LEAD_K = 0.32; // lookahead metres per (m/s)
 const MAX_LEAD_M = 6;
 const CAM_SMOOTH = 0.12; // camera lerp factor per frame
 
+// ── DEV-ONLY collision-shape overlay (REMOVE BEFORE LAUNCH) ─────────────────
+// Thin bright outlines of the REAL physics bodies (wheel circles + chassis box)
+// over the bike art, to line the sprite up with collision using the B tuner.
+// Toggle with `J`, or show on load with ?showbodies=1. Inert until toggled; no
+// physics touched (reads the snapshot poses + tune fixture sizes only).
+let showBodies = false;
+try {
+  showBodies = new URLSearchParams(location.search).get("showbodies") === "1";
+} catch {
+  /* no window — ignore */
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() !== "j") return;
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+    showBodies = !showBodies;
+  });
+}
+
+function drawBodies(
+  ctx: CanvasRenderingContext2D,
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+  scale: number,
+  prev: SimSnapshot,
+  curr: SimSnapshot,
+  alpha: number,
+  tune: BikeTune,
+): void {
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1.5;
+
+  // Wheel circles (radius = the real fixture radius) + a spoke to show spin.
+  ctx.strokeStyle = "#00ffff";
+  for (const key of ["rearWheel", "frontWheel"] as const) {
+    const x = toX(lerp(prev[key].x, curr[key].x, alpha));
+    const y = toY(lerp(prev[key].y, curr[key].y, alpha));
+    const r = tune.wheelRadius * scale;
+    const a = -lerp(prev[key].angle, curr[key].angle, alpha);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    ctx.stroke();
+  }
+
+  // Chassis collision box.
+  const cx = toX(lerp(prev.chassis.x, curr.chassis.x, alpha));
+  const cy = toY(lerp(prev.chassis.y, curr.chassis.y, alpha));
+  const cAngle = -lerp(prev.chassis.angle, curr.chassis.angle, alpha);
+  ctx.strokeStyle = "#ffe000";
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(cAngle);
+  ctx.strokeRect(
+    (-tune.chassisWidth / 2) * scale,
+    (-tune.chassisHeight / 2) * scale,
+    tune.chassisWidth * scale,
+    tune.chassisHeight * scale,
+  );
+  ctx.restore();
+
+  ctx.restore();
+}
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -166,6 +234,7 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
 
       trail.draw(ctx, toX, toY, skin.trail);
       drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune, skin, inputMask: mask });
+      if (showBodies) drawBodies(ctx, toX, toY, pxPerM, prev, curr, alpha, tune);
       drawParticles(ctx, particles, toX, toY, pxPerM, skin.primary);
 
       if (shaken) ctx.restore();
