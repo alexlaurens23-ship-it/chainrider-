@@ -46,8 +46,8 @@ export const BIKE_TUNE: BikeSpriteTune = {
   FRAME_OFFSET_X: 0,
   FRAME_OFFSET_Y: 0,
   SPRITE_ROTATION_OFFSET: 0,
-  FRONT_WHEEL_DIAMETER_M: 0.9,
-  REAR_WHEEL_DIAMETER_M: 0.9,
+  FRONT_WHEEL_DIAMETER_M: 0.68,
+  REAR_WHEEL_DIAMETER_M: 0.68,
   FRONT_WHEEL_OFFSET_X: 0,
   FRONT_WHEEL_OFFSET_Y: 0,
   REAR_WHEEL_OFFSET_X: 0,
@@ -77,7 +77,7 @@ export interface BikeView {
 const spriteCache = new Map<string, HTMLImageElement>();
 // Bump when the art files change so the browser fetches the new image instead of
 // a stale cached one (the public/ paths stay the same). Cached by bare path.
-const SPRITE_CACHE_BUST = "v8";
+const SPRITE_CACHE_BUST = "v9";
 
 function getSprite(path: string): HTMLImageElement {
   let img = spriteCache.get(path);
