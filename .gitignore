@@ -4,10 +4,10 @@ node_modules/
 # build output
 dist/
 
-# secrets / env
-.env
-.env.local
-.env.*.local
+# secrets / env — ignore ALL env files, keep only the committed templates
+.env*
+!.env.example
+!.env.sample
 
 # launch tooling output
 launch-result.json
