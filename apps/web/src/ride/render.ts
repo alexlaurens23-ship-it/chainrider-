@@ -412,6 +412,19 @@ function drawMarkers(
 
 // ── Minimap (whole track baked once, position dot live) ─────────────────────
 
+// Shared minimap mapping (CSS px) — used by BOTH the baked line and the live dot
+// so the dot sits exactly on the drawn polyline.
+const MINI_PAD = 5;
+function miniX(x: number, minX: number, maxX: number): number {
+  const span = maxX - minX || 1;
+  return MINI_PAD + ((x - minX) / span) * (MINIMAP_W - MINI_PAD * 2);
+}
+function miniY(y: number, minY: number, maxY: number): number {
+  const span = maxY - minY || 1;
+  return MINIMAP_H - MINI_PAD - ((y - minY) / span) * (MINIMAP_H - MINI_PAD * 2);
+}
+
+/** Bake THIS track's actual chart polyline once (full resolution, every vertex). */
 function bakeMinimap(
   terrain: TrackInfo["terrain"],
   minX: number,
@@ -427,19 +440,15 @@ function bakeMinimap(
   if (!ctx) return off;
   ctx.scale(dpr, dpr);
 
-  const pad = 5;
-  const spanX = maxX - minX || 1;
-  const spanY = maxY - minY || 1;
-  const sx = (x: number): number => pad + ((x - minX) / spanX) * (MINIMAP_W - pad * 2);
-  const sy = (y: number): number => MINIMAP_H - pad - ((y - minY) / spanY) * (MINIMAP_H - pad * 2);
-
   ctx.strokeStyle = "rgba(0, 229, 255, 0.7)";
   ctx.lineWidth = 1;
+  ctx.lineJoin = "round";
   ctx.beginPath();
-  const stride = Math.max(1, Math.floor(terrain.length / MINIMAP_W));
-  for (let i = 0; i < terrain.length; i += stride) {
-    const px = sx(terrain[i][0]);
-    const py = sy(terrain[i][1]);
+  // Full resolution (no stride) so the drawn line == terrainYAt's interpolation,
+  // i.e. the dot rides exactly the same curve the minimap shows.
+  for (let i = 0; i < terrain.length; i++) {
+    const px = miniX(terrain[i][0], minX, maxX);
+    const py = miniY(terrain[i][1], minY, maxY);
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }
@@ -462,23 +471,20 @@ function drawMinimap(
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, minimap.width, minimap.height);
-  ctx.drawImage(baked, 0, 0);
-  ctx.scale(dpr, dpr);
+  ctx.drawImage(baked, 0, 0); // the baked chart fills the native canvas 1:1
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS px for the dot
 
-  const pad = 5;
-  const spanX = maxX - minX || 1;
-  const spanY = maxY - minY || 1;
-  const t = clamp((chassisX - minX) / spanX, 0, 1);
-  const dotX = pad + t * (MINIMAP_W - pad * 2);
-  // Ride the dot on the polyline: sample the track y at the bike's x and map it
-  // through the same transform the baked line uses.
-  const trackY = terrainYAt(terrain, chassisX);
-  const dotY = MINIMAP_H - pad - ((trackY - minY) / spanY) * (MINIMAP_H - pad * 2);
+  // Dot: X from the rider's world progress, Y sampled on the SAME polyline the
+  // line drew (terrainYAt is the linear interpolation of those vertices), so the
+  // dot always sits on the chart and slides along it as the rider advances.
+  const x = clamp(chassisX, minX, maxX);
+  const dotX = miniX(x, minX, maxX);
+  const dotY = miniY(terrainYAt(terrain, x), minY, maxY);
   ctx.fillStyle = CHART_UP;
   ctx.shadowColor = CHART_UP;
   ctx.shadowBlur = 6;
   ctx.beginPath();
-  ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
+  ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowBlur = 0;
 }
