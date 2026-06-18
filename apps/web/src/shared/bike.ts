@@ -2,13 +2,16 @@ import type { BikeTune, SimSnapshot } from "@chainrider/physics";
 import { SKINS, type Skin } from "../skins";
 
 /**
- * 3-piece hybrid sprite bike (P5.5). Frame+rider is one PNG drawn at the chassis
- * pose; each wheel is its own PNG drawn at its OWN physics-body position +
- * rotation. Because each wheel tracks its own body, the suspension gap between
- * frame and wheels visibly flexes over bumps and the wheels spin with their
- * rotation. On crash all three tumble with their bodies. Cosmetic only — reads
- * the snapshot, never touches physics. The glow trail stays code-drawn (drawn
- * BEHIND this, in ride/render + playground). Shared by ride + playground.
+ * 3-piece hybrid sprite bike (P5.5 → P5.7 forkless Tron art). Frame+rider is one
+ * PNG at the chassis pose (FRAME_OFFSET applied in CHASSIS-LOCAL space, so it
+ * holds alignment at any rotation); each wheel is its own hub-centred ring PNG
+ * drawn at its OWN physics-body world position, spun by that body's angle. The
+ * art has NO forks between frame and wheels, so the wheels float — suspension
+ * travel just moves a floating ring (nothing to look stretched), and because each
+ * wheel tracks its real body, alignment can't drift through flips/wheelies/slopes.
+ * On crash all three tumble with their bodies. Cosmetic only — reads the snapshot,
+ * never touches physics. The glow trail stays code-drawn BEHIND this. Shared by
+ * ride + playground.
  */
 
 /**
@@ -35,17 +38,20 @@ export interface BikeSpriteTune {
   REAR_WHEEL_OFFSET_Y: number;
 }
 
+// Neutral starting defaults for the NEW forkless art (hub-centred identical
+// rings → wheel offsets ~0 since each ring sits on its physics hub). Re-dial with
+// the in-browser panel (toggle B / ?biketune=1), then bake the COPY VALUES here.
 export const BIKE_TUNE: BikeSpriteTune = {
-  FRAME_WIDTH_M: 2.35,
-  FRAME_OFFSET_X: -0.06,
-  FRAME_OFFSET_Y: -0.17,
-  SPRITE_ROTATION_OFFSET: -0.195,
-  FRONT_WHEEL_DIAMETER_M: 0.88,
-  REAR_WHEEL_DIAMETER_M: 0.88,
-  FRONT_WHEEL_OFFSET_X: 0.37,
-  FRONT_WHEEL_OFFSET_Y: -0.02,
-  REAR_WHEEL_OFFSET_X: -0.3,
-  REAR_WHEEL_OFFSET_Y: 0.02,
+  FRAME_WIDTH_M: 2.6,
+  FRAME_OFFSET_X: 0,
+  FRAME_OFFSET_Y: 0,
+  SPRITE_ROTATION_OFFSET: 0,
+  FRONT_WHEEL_DIAMETER_M: 0.9,
+  REAR_WHEEL_DIAMETER_M: 0.9,
+  FRONT_WHEEL_OFFSET_X: 0,
+  FRONT_WHEEL_OFFSET_Y: 0,
+  REAR_WHEEL_OFFSET_X: 0,
+  REAR_WHEEL_OFFSET_Y: 0,
 };
 
 function lerp(a: number, b: number, t: number): number {
