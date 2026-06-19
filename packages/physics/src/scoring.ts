@@ -20,9 +20,9 @@ export const SCORING_CONFIG = {
   /** Score for finishing exactly at par with no tricks/crashes. */
   baseFinish: 10000,
   /** Speed multiplier exponent — >1 richly rewards beating par. */
-  speedExp: 1.5,
-  /** rawTrickPoints are scaled by this at finish — tricks are a garnish. */
-  trickWeight: 0.15,
+  speedExp: 1.25, // P8.12: raw speed matters a bit less
+  /** rawTrickPoints are scaled by this at finish. */
+  trickWeight: 1.0, // P8.12: tricks matter much more (was 0.15)
   /** Each crash adds this to the effective finish time. */
   crashTimePenaltyMs: 3000,
   /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */

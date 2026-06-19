@@ -547,6 +547,7 @@ export function getSnapshot(sim: Sim): SimSnapshot {
     score: s.score,
     speedScore: s.speedScore,
     trickBonus: s.trickBonus,
+    rawTrickPoints: s.rawTrickPoints,
     effectiveTimeMs: s.effectiveTimeMs,
     combo: s.combo,
     flips: s.flips,

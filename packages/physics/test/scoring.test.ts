@@ -13,15 +13,15 @@ describe("time-primary scoring — exploit is dead", () => {
       crashes: 0,
       rawTrickPoints: 0,
     });
-    // (b) finished at 2× par with 5 crashes and a heavily-tricked run.
-    // 15000 raw points generously over-models "10 flips + tricks" (5 crashes
-    // keep resetting the combo, so real runs accumulate far less).
+    // (b) finished at 2× par with 5 crashes and a moderately-tricked run. Post
+    // P8.12 tricks are weighted ×1.0, so this uses a realistic ~4000 raw (a few
+    // flips); a clean par finish still beats a slow run with moderate tricks.
     const slowFarm = computeFinalScore({
       finished: true,
       finishTimeMs: 2 * PAR,
       parTimeMs: PAR,
       crashes: 5,
-      rawTrickPoints: 15_000,
+      rawTrickPoints: 4000,
     });
     expect(fastClean.score).toBeGreaterThan(slowFarm.score);
     // The spine: a clean par finish is ~baseFinish; the farmed run's speed
@@ -33,8 +33,8 @@ describe("time-primary scoring — exploit is dead", () => {
   it("beating par is richly rewarded (exponent > 1)", () => {
     const atPar = computeFinalScore({ finished: true, finishTimeMs: PAR, parTimeMs: PAR, crashes: 0, rawTrickPoints: 0 });
     const halfPar = computeFinalScore({ finished: true, finishTimeMs: PAR / 2, parTimeMs: PAR, crashes: 0, rawTrickPoints: 0 });
-    // 2× pace → 2^1.5 ≈ 2.83× the score, not just 2×.
-    expect(halfPar.speedScore).toBeGreaterThan(atPar.speedScore * 2.5);
+    // 2× pace → 2^1.25 ≈ 2.38× the score (P8.12 exponent), still well above linear.
+    expect(halfPar.speedScore).toBeGreaterThan(atPar.speedScore * 2.2);
   });
 
   it("each crash adds 3 s of effective time", () => {
@@ -50,13 +50,16 @@ describe("time-primary scoring — exploit is dead", () => {
     expect(dnf.speedScore).toBe(0);
     expect(dnf.score).toBe(dnf.trickBonus);
     expect(finished.score).toBeGreaterThan(dnf.score);
-    // Even a DNF that farmed tricks loses to a clean finish that did nothing fancy.
-    const dnfFarmed = computeFinalScore({ finished: false, finishTimeMs: PAR, parTimeMs: PAR, crashes: 0, rawTrickPoints: 20_000 });
+    // A DNF with moderate tricks still loses to a clean finish (and DNFs never
+    // rank anyway — eligibleForRank requires finished). NOTE post-P8.12: with
+    // tricks ×1.0, an EXTREME farm could out-score on raw points, so the real
+    // anti-exploit guard is the finished-required ranking gate, not this formula.
+    const dnfFarmed = computeFinalScore({ finished: false, finishTimeMs: PAR, parTimeMs: PAR, crashes: 0, rawTrickPoints: 4000 });
     const cleanFinish = computeFinalScore({ finished: true, finishTimeMs: PAR, parTimeMs: PAR, crashes: 0, rawTrickPoints: 0 });
     expect(cleanFinish.score).toBeGreaterThan(dnfFarmed.score);
   });
 
-  it("trick bonus is a 0.15 garnish of raw trick points", () => {
+  it("trick bonus is rawTrickPoints × trickWeight", () => {
     const r = computeFinalScore({ finished: true, finishTimeMs: PAR, parTimeMs: PAR, crashes: 0, rawTrickPoints: 1000 });
     expect(r.trickBonus).toBe(Math.round(1000 * SCORING_CONFIG.trickWeight));
   });

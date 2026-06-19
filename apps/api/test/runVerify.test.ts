@@ -146,7 +146,7 @@ describe("maxPlausibleScore", () => {
     const short = maxPlausibleScore({ ticks: 300, claimedFlips: 0, parTimeMs: 60000, finished: false, finishTimeMs: 5000, worldLength: 410 });
     const long = maxPlausibleScore({ ticks: 30000, claimedFlips: 0, parTimeMs: 60000, finished: false, finishTimeMs: 5000, worldLength: 410 });
     expect(long).toBeGreaterThan(short);
-    expect(short).toBeLessThan(2000); // a 5s ride can't plausibly score thousands of trick points
+    expect(short).toBeLessThan(3000); // a 5s ride stays small vs a real finish (~10000+); trickWeight 1.0 (P8.12)
   });
   it("is generous enough that a real finishing run clears it", () => {
     const result = simulateReplay(FLAT, DEFAULT_TUNE, THROTTLE_LOG, 72000);

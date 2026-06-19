@@ -222,6 +222,8 @@ export interface SimSnapshot {
   speedScore: number;
   /** Weighted trick component. */
   trickBonus: number;
+  /** Un-weighted accumulated trick points (pre-trickWeight). */
+  rawTrickPoints: number;
   /** Finish time + crash penalties, ms (set at finish). */
   effectiveTimeMs: number;
   combo: number;
@@ -251,6 +253,8 @@ export interface FinalResult {
   speedScore: number;
   /** Weighted trick component. */
   trickBonus: number;
+  /** Un-weighted accumulated trick points (pre-trickWeight). */
+  rawTrickPoints: number;
   /** Finish time + crash penalties, ms. */
   effectiveTimeMs: number;
   /** Finish time if finished, else total simulated time. Ms of sim time. */

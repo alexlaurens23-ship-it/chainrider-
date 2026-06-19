@@ -1,7 +1,12 @@
+import { SIM_VERSION } from "@chainrider/physics";
 import { getToken } from "../auth";
 import type { SubmitRunResult } from "../net";
 import { createSkinPicker } from "../skins";
 import { formatClock, formatScore } from "../ui/format";
+
+// DEV-ONLY (P8.12 — REMOVE BEFORE LAUNCH): the SIM_VERSION before this rebalance,
+// printed next to the live one so the real current number is unambiguous.
+const PREV_SIM_VERSION = 13;
 
 /** Score as a fraction of the track's max earns stars at these cutoffs. */
 const STAR_FRACTIONS = [0.12, 0.28, 0.46, 0.66, 0.9];
@@ -14,6 +19,8 @@ export interface RunSummary {
   trickBonus: number;
   /** Finish time + crash penalties, ms. */
   effectiveTimeMs: number;
+  /** Un-weighted accumulated trick points (DEV readout). */
+  rawTrickPoints: number;
   finished: boolean;
   flips: number;
   backflips: number;
@@ -63,6 +70,8 @@ export function showRunComplete(
       <div class="rc-score">${formatScore(summary.score)}</div>
       <div class="stars">${starHtml}</div>
       <div class="rc-breakdown">Speed ${formatScore(summary.speedScore)} + Tricks ${formatScore(summary.trickBonus)}</div>
+      <!-- DEV-ONLY (P8.12): raw scoring components — REMOVE BEFORE LAUNCH -->
+      <div class="rc-dev">DEV · raw ${summary.rawTrickPoints} · speed ${summary.speedScore} · trickBonus ${summary.trickBonus} · final ${summary.score} · sim ${SIM_VERSION} (was ${PREV_SIM_VERSION})</div>
       <div class="rc-grid">
         <div class="cell"><span class="k">Time</span><span class="v">${timeLine}</span></div>
         <div class="cell"><span class="k">Crashes</span><span class="v">${summary.crashes}</span></div>

@@ -48,6 +48,7 @@ export function simulateReplay(
     score: s.score,
     speedScore: s.speedScore,
     trickBonus: s.trickBonus,
+    rawTrickPoints: s.rawTrickPoints,
     effectiveTimeMs: s.effectiveTimeMs,
     timeMs: (sim.finished ? sim.finishTick : sim.tick) * SIM_DT * 1000,
     ticks: sim.tick,
