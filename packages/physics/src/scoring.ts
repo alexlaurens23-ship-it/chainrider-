@@ -22,7 +22,7 @@ export const SCORING_CONFIG = {
   /** Speed multiplier exponent — >1 richly rewards beating par. */
   speedExp: 1.25, // P8.12: raw speed matters a bit less
   /** rawTrickPoints are scaled by this at finish. */
-  trickWeight: 1.0, // P8.12: tricks matter much more (was 0.15)
+  trickWeight: 0.35, // P8.13: dialed down from 1.0 (still well above the original 0.15)
   /** Each crash adds this to the effective finish time. */
   crashTimePenaltyMs: 3000,
   /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */
