@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@chainrider/physics": "0.1.0",
-    "bs58": "^6.0.0"
+    "bs58": "^6.0.0",
+    "tone": "^15.0.4"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
