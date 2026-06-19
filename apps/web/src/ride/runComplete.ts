@@ -8,8 +8,10 @@ import { formatClock, formatScore } from "../ui/format";
 // printed next to the live one so the real current number is unambiguous.
 const PREV_SIM_VERSION = 13;
 
-/** Score as a fraction of the track's max earns stars at these cutoffs. */
-const STAR_FRACTIONS = [0.12, 0.28, 0.46, 0.66, 0.9];
+/** Score as a fraction of the track's max earns stars at these cutoffs (P8.15:
+ *  recalibrated to the multiplicative scale; at maxScore 50000 →
+ *  1★ 5k / 2★ 10k / 3★ 16k / 4★ 23k / 5★ 33k). */
+const STAR_FRACTIONS = [0.1, 0.2, 0.32, 0.46, 0.66];
 
 export interface RunSummary {
   score: number;
@@ -53,6 +55,11 @@ export function showRunComplete(
   const starHtml = Array.from({ length: 5 }, (_, i) =>
     i < stars ? `<span class="on">★</span>` : `<span class="off">★</span>`,
   ).join("");
+  // Next-star target so players can see exactly what to chase ("MAX ★" at 5).
+  const nextStarLabel =
+    stars >= STAR_FRACTIONS.length
+      ? "MAX ★"
+      : `Next ★ ${formatScore(Math.round(STAR_FRACTIONS[stars] * summary.maxScore))}`;
 
   // Score is time-primary: a speed component (from par/effective-time) plus a
   // small trick garnish. Effective time = ride time + 3 s per crash.
@@ -69,6 +76,7 @@ export function showRunComplete(
       <div class="rc-head">${summary.finished ? "FINISH" : "RUN ENDED — no finish, tricks only"}</div>
       <div class="rc-score">${formatScore(summary.score)}</div>
       <div class="stars">${starHtml}</div>
+      <div class="rc-next ${stars >= 5 ? "maxed" : ""}">${nextStarLabel}</div>
       <div class="rc-breakdown">Speed ${formatScore(summary.speedScore)} + Tricks ${formatScore(summary.trickBonus)}</div>
       <!-- DEV-ONLY (P8.12/P8.14): raw scoring components — REMOVE BEFORE LAUNCH -->
       <div class="rc-dev">DEV · speed ${summary.speedScore} · raw ${summary.rawTrickPoints} · ×${(1 + summary.rawTrickPoints / SCORING_CONFIG.trickAmplifyK).toFixed(3)} · final ${summary.score} · sim ${SIM_VERSION} (was ${PREV_SIM_VERSION})</div>

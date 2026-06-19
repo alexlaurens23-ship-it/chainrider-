@@ -225,8 +225,9 @@ _Update at the end of every session._
 
 - **P8.14 — multiplicative final score** (2026-06-19): final = `round(speedScore × (1 + rawTrickPoints/trickAmplifyK))`, new `trickAmplifyK = 25000`. Tricks amplify the speed score instead of adding, so a slow/crashy run (low speedScore) can't out-farm a clean fast one. `updateScore` sets the multiplicative final on the finished frame; the live HUD score stays the trick tally during the run (so HUD + flip popups read correctly). DNF still = trickBonus (rawTrickPoints×0.35) and never ranks. DEV run-complete readout updated → speed · raw · ×multiplier · final. SIM_VERSION still **14** (dialing). Verified: 15/15 physics + 102/102 api (no test edits needed — invariants hold), verify clean, web build clean. **Star rating not yet recalibrated** (reported for the new scale; see Pre-deploy lock).
 
+- **P8.15 — star recalibration** (2026-06-19): `STAR_FRACTIONS` → `[0.1,0.2,0.32,0.46,0.66]` of `maxScore` (50000) → 1★ 5k / 2★ 10k / 3★ 16k / 4★ 23k / 5★ 33k (5★ now achievable: fast+clean+tricky). Added a next-star target under the stars on the run-complete card ("Next ★ <score>", or gold "MAX ★" at 5). Frontend only, no SIM bump. Verified: verify clean, web build clean.
+
 **In progress**
-- **Star rating recalibration**: `STAR_FRACTIONS=[0.12,0.28,0.46,0.66,0.9]` of `maxScore` (DEFAULT 50000 / `/api/stats` config.maxScoreDefault) keys off the final score (`runComplete.ts`); revisit thresholds for the new multiplicative scale.
 - **Pre-deploy lock**: when the score balance is final, do a clean SIM_VERSION bump (currently 14) + clear cr_runs/cr_payouts (boards), and remove the DEV run-complete readout (`rc-dev`, P8.12).
 
 **Next**
