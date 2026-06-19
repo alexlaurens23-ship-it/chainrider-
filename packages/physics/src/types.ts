@@ -125,7 +125,7 @@ export const DEFAULT_TUNE: BikeTune = {
   stabilizerStrength: 90,
   stabilizerDamping: 12,
   torqueFalloffFloor: 0.35,
-  hillAssist: 0.45,
+  hillAssist: 0.6, // P8.5: slightly stronger up-slope push so a stuck bike climbs out of ruts
   antiWheelieFloor: 0.4,
   jumpImpulse: 5,
   headRadius: 0.18,
@@ -140,7 +140,7 @@ export const DEFAULT_TUNE: BikeTune = {
   reverseMotorTorque: 60,
   reverseMotorSpeed: 17,
   reverseMaxSpeed: 5.5,
-  reverseHillAssist: 0.5,
+  reverseHillAssist: 0.65, // P8.5: stronger reverse-rock so the bike backs out of a rut
   reverseHillMinSlopeDeg: 15,
 };
 
