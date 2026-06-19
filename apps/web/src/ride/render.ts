@@ -58,8 +58,6 @@ export interface RideRenderer {
   ): void;
   /** Reset camera smoothing + effects (on respawn). */
   reset(spawnX: number, spawnY: number): void;
-  /** SOL prize shown on the finish flag (null = just "FINISH"). */
-  setFinishPrize(sol: number | null): void;
 }
 
 export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement): RideRenderer {
@@ -91,7 +89,6 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
   let lastCombo = 1;
   let lastScore = 0;
   let lastCrashed = false;
-  let finishPrize: number | null = null;
   const reduceMotion = prefersReducedMotion();
 
   function spawnCrashBurst(wx: number, wy: number): void {
@@ -116,10 +113,6 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       lastCombo = 1;
       lastScore = 0;
       lastCrashed = false;
-    },
-
-    setFinishPrize(sol) {
-      finishPrize = sol;
     },
 
     render(ctx, w, h, prev, curr, alpha, speed, tune, mask) {
@@ -192,7 +185,7 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       drawGrid(ctx, w, h, toX, toY, camXMin, camXMax, minX, maxX, minY, maxY);
       drawTerrain(ctx, h, toX, toY, terrain, camXMin, camXMax);
       drawMarkers(ctx, w, h, toX, toY, track, tune);
-      drawFinishFlag(ctx, toX, toY, pxPerM, w, track.finishX, terrainYAt(terrain, track.finishX), finishPrize, skin.primary);
+      drawFinishFlag(ctx, toX, toY, pxPerM, w, track.finishX, terrainYAt(terrain, track.finishX), skin.primary);
 
       trail.draw(ctx, toX, toY, skin.trail);
       drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune, skin, inputMask: mask });
@@ -406,7 +399,6 @@ function drawFinishFlag(
   w: number,
   finishX: number,
   groundY: number,
-  prize: number | null,
   color: string,
 ): void {
   const baseX = toX(finishX);
@@ -449,14 +441,6 @@ function drawFinishFlag(
   ctx.lineWidth = 2;
   ctx.strokeRect(fx0, topY, flagW, flagH);
 
-  // Label: finish prize (or just FINISH).
-  ctx.shadowBlur = 8;
-  ctx.fillStyle = color;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.font = "bold 13px monospace";
-  const label = prize != null && prize > 0 ? `FINISH · ${prize} SOL` : "FINISH";
-  ctx.fillText(label, baseX - flagW / 2, topY - 6);
   ctx.shadowBlur = 0;
   ctx.restore();
 }
