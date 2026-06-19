@@ -10,7 +10,7 @@ import {
   type StatsResponse,
 } from "../net";
 import type { Screen } from "../router";
-import { formatCountdown, formatScore, formatSol, tierColor } from "../ui/format";
+import { formatCountdown, formatHms, formatScore, formatSol, tierColor } from "../ui/format";
 import { drawSparkline } from "../ui/sparkline";
 
 /** Ms until the next 00:00 UTC (daily challenge reset). */
@@ -100,7 +100,7 @@ export function createHomeScreen(): Screen {
 
       // Daily challenge countdown ticks to the next 00:00 UTC.
       function tickDaily(): void {
-        dailyCdEl.textContent = formatCountdown(msToNextUtcMidnight());
+        dailyCdEl.textContent = formatHms(msToNextUtcMidnight()); // HH:MM:SS (up to 24h)
       }
       tickDaily();
       dailyTimer = window.setInterval(tickDaily, 1000);
