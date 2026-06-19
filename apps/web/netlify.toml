@@ -5,7 +5,10 @@
 # Netlify origin forward /api/* to the Railway API with no CORS dance.
 
 [build]
-  command = "npm run build -w @chainrider/web"
+  # Build physics FIRST so its .d.ts declarations exist before the web typecheck
+  # (apps/web's build runs tsc --noEmit and imports @chainrider/physics; on a fresh
+  # Netlify checkout the package isn't built, so the web build fails with TS2307).
+  command = "npm run build -w @chainrider/physics && npm run build -w @chainrider/web"
   publish = "apps/web/dist"
 
 # Proxy API calls to Railway (status 200 = transparent reverse proxy, not a 30x).
