@@ -20,6 +20,12 @@ function msToNextUtcMidnight(): number {
   return next - now.getTime();
 }
 
+const X_URL = "https://x.com/ChainRiderSol";
+const X_GLYPH =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.66l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+const X_LINK = (extra = ""): string =>
+  `<a class="x-link" href="${X_URL}" target="_blank" rel="noopener noreferrer" aria-label="ChainRider on X">${X_GLYPH}${extra}</a>`;
+
 export function createHomeScreen(): Screen {
   let countdownTimer = 0;
   let dailyTimer = 0;
@@ -32,6 +38,7 @@ export function createHomeScreen(): Screen {
         <div class="topnav">
           <a href="#/">HOME</a>
           <a href="#/payouts">PAYOUTS</a>
+          ${X_LINK()}
         </div>
         <h1 class="hero-title">CHAINRIDER</h1>
         <p class="hero-tagline">Ride real crypto charts. Top the 30-minute window, get paid in SOL.</p>
@@ -52,6 +59,9 @@ export function createHomeScreen(): Screen {
           <div class="countdown"><span>RESETS IN</span> <span class="cd-time" id="daily-cd">--:--:--</span></div>
         </div>
         <div id="daily"><div class="empty-state">Loading today's challenge…</div></div>
+        <footer class="site-footer">
+          ${X_LINK('<span>@ChainRiderSol</span>')}
+        </footer>
       `;
       root.appendChild(page);
 

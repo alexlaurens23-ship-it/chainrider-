@@ -965,6 +965,32 @@
         border-radius: 4px;
         margin-left: 6px;
       }
+      /* X / Twitter link (P8.8) */
+      .x-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: #00e5ff;
+        text-decoration: none;
+        transition: filter 0.15s ease, transform 0.15s ease;
+        filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.5));
+      }
+      .x-link:hover {
+        filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.9));
+        transform: scale(1.08);
+      }
+      .topnav .x-link {
+        margin-left: auto; /* push the X glyph to the right edge of the nav */
+      }
+      .site-footer {
+        display: flex;
+        justify-content: center;
+        padding: 28px 0 20px;
+        margin-top: 18px;
+        border-top: 1px solid rgba(91, 113, 132, 0.18);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
       /* New-player controls hint on the ride screen (P8.4) */
       .ride-controls-hint {
         position: fixed;
