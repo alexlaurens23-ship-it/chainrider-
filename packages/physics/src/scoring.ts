@@ -29,8 +29,11 @@ export const SCORING_CONFIG = {
   trickAmplifyK: 25000,
   /** Each crash adds this to the effective finish time. */
   crashTimePenaltyMs: 3000,
-  /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */
-  parPaceMps: { VOLATILE: 8, DEGEN: 7, SAVAGE: 6 },
+  /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000.
+   *  P8.16: eased (lower pace = longer par) so a clean competent run beats par.
+   *  NOTE: consumed at track GENERATION (routes/admin.ts) → stored in
+   *  cr_tracks.par_time_ms; existing tracks need a reseed to pick up new values. */
+  parPaceMps: { VOLATILE: 5.5, DEGEN: 4.5, SAVAGE: 3.5 },
 } as const;
 
 export type ScoringConfig = typeof SCORING_CONFIG;
