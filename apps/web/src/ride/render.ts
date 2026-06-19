@@ -126,6 +126,8 @@ export interface RideRenderer {
   ): void;
   /** Reset camera smoothing + effects (on respawn). */
   reset(spawnX: number, spawnY: number): void;
+  /** SOL prize shown on the finish flag (null = just "FINISH"). */
+  setFinishPrize(sol: number | null): void;
 }
 
 export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement): RideRenderer {
@@ -157,6 +159,7 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
   let lastCombo = 1;
   let lastScore = 0;
   let lastCrashed = false;
+  let finishPrize: number | null = null;
   const reduceMotion = prefersReducedMotion();
 
   function spawnCrashBurst(wx: number, wy: number): void {
@@ -181,6 +184,10 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       lastCombo = 1;
       lastScore = 0;
       lastCrashed = false;
+    },
+
+    setFinishPrize(sol) {
+      finishPrize = sol;
     },
 
     render(ctx, w, h, prev, curr, alpha, speed, tune, mask) {
@@ -253,6 +260,7 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       drawGrid(ctx, w, h, toX, toY, camXMin, camXMax, minX, maxX, minY, maxY);
       drawTerrain(ctx, h, toX, toY, terrain, camXMin, camXMax);
       drawMarkers(ctx, w, h, toX, toY, track, tune);
+      drawFinishFlag(ctx, toX, toY, pxPerM, w, track.finishX, terrainYAt(terrain, track.finishX), finishPrize, skin.primary);
 
       trail.draw(ctx, toX, toY, skin.trail);
       drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune, skin, inputMask: mask });
@@ -454,16 +462,72 @@ function drawMarkers(
     ctx.stroke();
   }
 
-  // Finish flag.
-  const fx = toX(track.finishX);
-  if (fx > -20 && fx < w + 20) {
-    ctx.strokeStyle = "#00ff88";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(fx, 0);
-    ctx.lineTo(fx, h);
-    ctx.stroke();
+  // (Finish marker is drawn separately by drawFinishFlag — neon checkered flag.)
+}
+
+/** Neon checkered finish flag (pole + flag) on the terrain at the track end,
+ *  labelled with the finish prize. World→screen so it tracks the camera. */
+function drawFinishFlag(
+  ctx: CanvasRenderingContext2D,
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+  scale: number,
+  w: number,
+  finishX: number,
+  groundY: number,
+  prize: number | null,
+  color: string,
+): void {
+  const baseX = toX(finishX);
+  if (baseX < -80 || baseX > w + 80) return; // off-screen
+  const baseY = toY(groundY);
+  const poleH = 3.6 * scale;
+  const topY = baseY - poleH;
+  const flagW = 1.9 * scale;
+  const flagH = 1.15 * scale;
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.shadowColor = color;
+
+  // Pole (neon).
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, 0.08 * scale);
+  ctx.beginPath();
+  ctx.moveTo(baseX, baseY);
+  ctx.lineTo(baseX, topY);
+  ctx.stroke();
+
+  // Checkered flag flying left (toward the approaching rider) from the pole top.
+  const cols = 4;
+  const rows = 3;
+  const cw = flagW / cols;
+  const ch = flagH / rows;
+  const fx0 = baseX - flagW;
+  ctx.shadowBlur = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      ctx.fillStyle = (r + c) % 2 === 0 ? "#ffffff" : "rgba(5,8,14,0.85)";
+      ctx.fillRect(fx0 + c * cw, topY + r * ch, cw + 0.5, ch + 0.5);
+    }
   }
+  // Neon border around the flag.
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(fx0, topY, flagW, flagH);
+
+  // Label: finish prize (or just FINISH).
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "bold 13px monospace";
+  const label = prize != null && prize > 0 ? `FINISH · ${prize} SOL` : "FINISH";
+  ctx.fillText(label, baseX - flagW / 2, topY - 6);
+  ctx.shadowBlur = 0;
+  ctx.restore();
 }
 
 // ── Minimap (whole track baked once, position dot live) ─────────────────────

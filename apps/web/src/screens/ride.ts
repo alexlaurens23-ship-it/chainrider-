@@ -1,7 +1,7 @@
 import { SIM_VERSION, createSim, getSnapshot, getTrackInfo } from "@chainrider/physics";
 import type { TrackInfo } from "@chainrider/physics";
 import { isLoggedIn, requireLogin } from "../auth";
-import { getStats, getTrackCached, submitRun, type TrackResponse } from "../net";
+import { getMapsCached, getStats, getTrackCached, submitRun, TIERS, type TrackResponse } from "../net";
 import type { Screen } from "../router";
 import { createRideInput } from "../ride/input";
 import { createRideLoop, type RideEnd, type RideLoop } from "../ride/loop";
@@ -101,6 +101,23 @@ export function createRideScreen(): Screen {
 
     const hud: RideHud = createRideHud(root, trackName);
     const renderer: RideRenderer = createRideRenderer(trackInfo, hud.minimap);
+
+    // Label the finish flag with this track's rank-1 prize (from /api/maps tiers).
+    getMapsCached()
+      .then((res) => {
+        for (const m of res.maps) {
+          for (const tier of TIERS) {
+            const tt = m.tiers[tier];
+            if (tt?.raw?.trackId === track.id || tt?.smooth?.trackId === track.id) {
+              renderer.setFinishPrize(tt.prize?.[0] ?? null);
+              return;
+            }
+          }
+        }
+      })
+      .catch(() => {
+        /* prize label is cosmetic — ignore */
+      });
 
     let muted = false;
     input = createRideInput({
