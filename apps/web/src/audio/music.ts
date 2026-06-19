@@ -283,6 +283,25 @@ async function unlock(): Promise<void> {
   play();
 }
 
+// Flip-bonus SFX — a quiet, brief rising two-note ping. Reuses the master bus, so
+// the master volume + mute apply; one persistent mono synth (no per-flip alloc).
+let sfxSynth: Tone.Synth | null = null;
+
+/** Play the flip blip. Silent if muted or audio isn't unlocked yet. */
+export function playFlipSfx(): void {
+  if (!unlocked || muted || !master) return;
+  if (!sfxSynth) {
+    sfxSynth = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.004, decay: 0.11, sustain: 0, release: 0.04 },
+    }).connect(master);
+    sfxSynth.volume.value = -15; // quiet — must not build into noise on repeat
+  }
+  const t = Tone.now();
+  sfxSynth.triggerAttackRelease("C6", "32n", t, 0.7);
+  sfxSynth.triggerAttackRelease("G6", "32n", t + 0.05, 0.7);
+}
+
 export function setMusicMode(isRide: boolean): void {
   const next: Mode = isRide ? "ride" : "menu";
   if (next === mode) return;

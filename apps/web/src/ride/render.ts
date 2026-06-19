@@ -1,5 +1,6 @@
 import { terrainYAt } from "@chainrider/physics";
 import type { BikeTune, SimSnapshot, TrackInfo } from "@chainrider/physics";
+import { playFlipSfx } from "../audio/music";
 import { drawBike } from "../shared/bike";
 import { createTrail } from "../shared/trail";
 import { getActiveSkin, prefersReducedMotion } from "../skins";
@@ -147,7 +148,10 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       // (the live trick-score delta — flips raise snapshot.score via rawTrickPoints).
       if (curr.flips > lastFlips) {
         const delta = Math.round(curr.score - lastScore);
-        if (delta > 0) popups.push({ x: chassisX, y: chassisY + 0.7, text: `+${delta}`, born: now });
+        if (delta > 0) {
+          popups.push({ x: chassisX, y: chassisY + 0.7, text: `+${delta}`, born: now });
+          playFlipSfx(); // quiet blip alongside the popup (respects mute)
+        }
       }
       if (!lastCrashed && curr.crashed) {
         spawnCrashBurst(chassisX, chassisY);
