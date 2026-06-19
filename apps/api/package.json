@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -21,12 +24,14 @@
     "dotenv": "^16.4.0",
     "fastify": "^5.0.0",
     "jsonwebtoken": "^9.0.2",
-    "node-cron": "^4.0.0"
+    "node-cron": "^4.0.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
