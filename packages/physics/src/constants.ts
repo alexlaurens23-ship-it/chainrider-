@@ -14,7 +14,7 @@ export const POSITION_ITERATIONS = 3;
  * scoring rules, tune defaults, terrain construction, or the input bit layout —
  * the server rejects runs whose simVersion it cannot reproduce.
  */
-export const SIM_VERSION = 14; // P8.12: trick rebalance (trickWeight 1.0, speedExp 1.25)
+export const SIM_VERSION = 15; // P9.0: locked launch scoring (multiplicative trick amplify + eased par)
 
 /** Flat terrain extensions around the chart polyline, in meters. */
 export const LEAD_IN_METERS = 20;

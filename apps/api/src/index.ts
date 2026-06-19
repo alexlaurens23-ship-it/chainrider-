@@ -16,7 +16,8 @@ import { runsRoutes } from "./routes/runs.js";
 import { statsRoutes } from "./routes/stats.js";
 import { mapsRoutes, tracksRoutes } from "./routes/tracks.js";
 
-const PORT = 8787;
+// Railway (and most PaaS) inject the port via env; fall back to 8787 for local dev.
+const PORT = Number(process.env.PORT) || 8787;
 
 async function main(): Promise<void> {
   // Refuse to boot with a blank/weak JWT secret (H2).

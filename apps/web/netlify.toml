@@ -1,0 +1,22 @@
+# Netlify build + hosting for the CHAINRIDER web client.
+# The API runs on Railway; replace <RAILWAY_API_URL> below with the live Railway
+# URL (e.g. https://chainrider-api.up.railway.app) once it deploys, then redeploy.
+# The client calls a RELATIVE /api base (see src/net.ts), so this proxy makes the
+# Netlify origin forward /api/* to the Railway API with no CORS dance.
+
+[build]
+  command = "npm run build -w @chainrider/web"
+  publish = "apps/web/dist"
+
+# Proxy API calls to Railway (status 200 = transparent reverse proxy, not a 30x).
+[[redirects]]
+  from = "/api/*"
+  to = "<RAILWAY_API_URL>/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback: every other path serves the hash-routed index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
