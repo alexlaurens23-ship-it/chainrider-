@@ -1,4 +1,4 @@
-import { SIM_VERSION } from "@chainrider/physics";
+import { SCORING_CONFIG, SIM_VERSION } from "@chainrider/physics";
 import { getToken } from "../auth";
 import type { SubmitRunResult } from "../net";
 import { createSkinPicker } from "../skins";
@@ -70,8 +70,8 @@ export function showRunComplete(
       <div class="rc-score">${formatScore(summary.score)}</div>
       <div class="stars">${starHtml}</div>
       <div class="rc-breakdown">Speed ${formatScore(summary.speedScore)} + Tricks ${formatScore(summary.trickBonus)}</div>
-      <!-- DEV-ONLY (P8.12): raw scoring components — REMOVE BEFORE LAUNCH -->
-      <div class="rc-dev">DEV · raw ${summary.rawTrickPoints} · speed ${summary.speedScore} · trickBonus ${summary.trickBonus} · final ${summary.score} · sim ${SIM_VERSION} (was ${PREV_SIM_VERSION})</div>
+      <!-- DEV-ONLY (P8.12/P8.14): raw scoring components — REMOVE BEFORE LAUNCH -->
+      <div class="rc-dev">DEV · speed ${summary.speedScore} · raw ${summary.rawTrickPoints} · ×${(1 + summary.rawTrickPoints / SCORING_CONFIG.trickAmplifyK).toFixed(3)} · final ${summary.score} · sim ${SIM_VERSION} (was ${PREV_SIM_VERSION})</div>
       <div class="rc-grid">
         <div class="cell"><span class="k">Time</span><span class="v">${timeLine}</span></div>
         <div class="cell"><span class="k">Crashes</span><span class="v">${summary.crashes}</span></div>

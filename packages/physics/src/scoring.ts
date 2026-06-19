@@ -22,7 +22,11 @@ export const SCORING_CONFIG = {
   /** Speed multiplier exponent — >1 richly rewards beating par. */
   speedExp: 1.25, // P8.12: raw speed matters a bit less
   /** rawTrickPoints are scaled by this at finish. */
-  trickWeight: 0.35, // P8.13: dialed down from 1.0 (still well above the original 0.15)
+  trickWeight: 0.35, // → trickBonus (DNF score + the displayed Speed/Tricks breakdown)
+  /** P8.14: multiplicative trick amplifier denominator (TRICK_K). A finished run's
+   *  final = round(speedScore × (1 + rawTrickPoints / trickAmplifyK)) — tricks
+   *  amplify speed instead of adding, so a slow/crashy run can't out-farm a fast one. */
+  trickAmplifyK: 25000,
   /** Each crash adds this to the effective finish time. */
   crashTimePenaltyMs: 3000,
   /** Assumed fair pace per difficulty tier (m/s) → par = worldLength/pace*1000. */
@@ -145,9 +149,11 @@ export interface FinalScoreResult {
 }
 
 /**
- * Pure time-primary finish formula. A finished run earns the speed multiplier
- * (richly for beating par, eroded by crash time penalties) plus a small trick
- * garnish; a DNF earns the trick garnish only. Tested directly.
+ * Pure finish formula. A finished run earns the speed score (richly for beating
+ * par, eroded by crash time penalties) AMPLIFIED by tricks (P8.14, multiplicative:
+ * final = speedScore × (1 + rawTrickPoints/trickAmplifyK)) — so a slow/crashy run
+ * with a low speed score can't out-farm a clean fast one. A DNF (no speed score)
+ * earns only the trick garnish (rawTrickPoints × trickWeight). Tested directly.
  */
 export function computeFinalScore(input: FinalScoreInput): FinalScoreResult {
   const trickBonus = Math.round(input.rawTrickPoints * SCORING_CONFIG.trickWeight);
@@ -160,7 +166,9 @@ export function computeFinalScore(input: FinalScoreInput): FinalScoreResult {
       ? input.parTimeMs / effectiveTimeMs
       : 1;
   const speedScore = Math.round(SCORING_CONFIG.baseFinish * Math.pow(ratio, SCORING_CONFIG.speedExp));
-  return { score: speedScore + trickBonus, speedScore, trickBonus, effectiveTimeMs };
+  const multiplier = 1 + input.rawTrickPoints / SCORING_CONFIG.trickAmplifyK;
+  const score = Math.round(speedScore * multiplier);
+  return { score, speedScore, trickBonus, effectiveTimeMs };
 }
 
 /** Combo-building trick: grow ×1→×5 within the window, award base × combo to rawTrickPoints. */
@@ -256,10 +264,14 @@ export function updateScore(state: ScoreState, frame: ScoreFrame): void {
       });
       state.speedScore = r.speedScore;
       state.effectiveTimeMs = r.effectiveTimeMs;
+      state.trickBonus = r.trickBonus;
+      state.score = r.score; // P8.14: multiplicative final (speed × trick amplifier)
+      return;
     }
   }
 
-  // Recompute the displayed score every tick: trick garnish always, speed once finished.
+  // Live (not finished): speedScore is 0, so the displayed score is the trick
+  // tally — keeps the HUD + flip popups meaningful during the run.
   state.trickBonus = Math.round(state.rawTrickPoints * SCORING_CONFIG.trickWeight);
   state.score = state.speedScore + state.trickBonus;
 }
