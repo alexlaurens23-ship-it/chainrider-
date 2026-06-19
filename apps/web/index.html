@@ -965,6 +965,26 @@
         border-radius: 4px;
         margin-left: 6px;
       }
+      /* New-player controls hint on the ride screen (P8.4) */
+      .ride-controls-hint {
+        position: fixed;
+        left: 50%;
+        bottom: 54px;
+        transform: translateX(-50%);
+        z-index: 50;
+        padding: 8px 16px;
+        border-radius: 8px;
+        background: rgba(5, 8, 14, 0.72);
+        border: 1px solid #2a3a4a;
+        color: #cfe;
+        font: 13px/1 monospace;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+        transition: opacity 0.8s ease;
+      }
+      .ride-controls-hint.fade {
+        opacity: 0;
+      }
       /* RIDE button in line with the tier row (P5.12) */
       .tier-ride-row {
         display: flex;

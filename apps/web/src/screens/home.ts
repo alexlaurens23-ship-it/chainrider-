@@ -32,7 +32,6 @@ export function createHomeScreen(): Screen {
         <div class="topnav">
           <a href="#/">HOME</a>
           <a href="#/payouts">PAYOUTS</a>
-          <a href="#/playground">PLAYGROUND</a>
         </div>
         <h1 class="hero-title">CHAINRIDER</h1>
         <p class="hero-tagline">Ride real crypto charts. Top the 30-minute window, get paid in SOL.</p>

@@ -15,10 +15,8 @@ import { SKINS, type Skin } from "../skins";
  */
 
 /**
- * Fit knobs (tune to seat the bike on the terrain + level it). A MUTABLE object
- * so the dev tuning panel (src/dev/bikeTunePanel.ts, toggled in-browser) can edit
- * them LIVE while riding. drawBike reads it every frame. These defaults are the
- * source of truth — once dialled in, bake the panel's COPY VALUES back here.
+ * Fit knobs that seat the bike sprite on the terrain (dialled in + baked, P5.10).
+ * drawBike reads this every frame; it's the source of truth for the sprite fit.
  */
 export interface BikeSpriteTune {
   /** Frame sprite width in WORLD METRES (frame scale). */

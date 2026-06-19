@@ -119,6 +119,14 @@ export function createRideScreen(): Screen {
         /* prize label is cosmetic — ignore */
       });
 
+    // New-player controls hint — shows briefly at the start of the ride, fades out.
+    const hint = document.createElement("div");
+    hint.className = "ride-controls-hint";
+    hint.textContent = "W throttle · Space jump · A/D lean";
+    root.appendChild(hint);
+    window.setTimeout(() => hint.classList.add("fade"), 4000);
+    window.setTimeout(() => hint.remove(), 5200);
+
     let muted = false;
     input = createRideInput({
       onRespawn: () => {

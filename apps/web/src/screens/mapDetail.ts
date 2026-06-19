@@ -43,7 +43,6 @@ export function createMapDetailScreen(): Screen {
       page.innerHTML = `
         <div class="topnav">
           <a href="#/">← HOME</a>
-          <a href="#/playground">PLAYGROUND</a>
         </div>
         <div id="detail"><div class="empty-state">Loading…</div></div>
       `;

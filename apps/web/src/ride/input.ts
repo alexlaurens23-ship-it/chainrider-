@@ -27,7 +27,7 @@ export interface RideInputHandlers {
 }
 
 /**
- * Keyboard → keymask for the ride screen. Same bit layout as the playground,
+ * Keyboard → keymask for the ride screen. Same INPUT bit layout as the sim,
  * plus R (respawn), M (mute), Esc (quit). Returns dispose() so the router can
  * tear down listeners cleanly.
  */

@@ -2,7 +2,6 @@ import { createAdminScreen } from "./screens/admin";
 import { createHomeScreen } from "./screens/home";
 import { createMapDetailScreen } from "./screens/mapDetail";
 import { createPayoutsScreen } from "./screens/payouts";
-import { createPlaygroundScreen } from "./screens/playground";
 import { createReplayScreen } from "./screens/replay";
 import { createRideScreen } from "./screens/ride";
 
@@ -29,7 +28,6 @@ const ROUTES: Route[] = [
   { pattern: ["replay", ":runId"], factory: createReplayScreen, scroll: false },
   { pattern: ["payouts"], factory: createPayoutsScreen, scroll: true },
   { pattern: ["admin"], factory: createAdminScreen, scroll: true },
-  { pattern: ["playground"], factory: createPlaygroundScreen, scroll: false },
 ];
 
 function parseHash(): string[] {

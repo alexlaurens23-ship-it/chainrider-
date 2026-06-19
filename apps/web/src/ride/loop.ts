@@ -53,7 +53,7 @@ export interface RideLoop {
 }
 
 /**
- * Fixed-timestep ride loop. Mirrors the playground accumulator exactly; all
+ * Fixed-timestep accumulator ride loop; all
  * physics/scoring stays in @chainrider/physics. Records the change-only
  * [tick, keymask] input log that P6 re-simulates server-side.
  */
