@@ -11,8 +11,23 @@
 
 /** World metres of x per daily candle. */
 export const SPACING_M = 6;
-/** No raw segment may exceed this absolute slope. */
+/** No raw segment may exceed this absolute slope (generation-internal headroom). */
 export const MAX_SLOPE_DEG = 55;
+/**
+ * The steepest sustained slope the CURRENT bike can actually climb and still
+ * feel hard-but-fair (empirically: clean single inclines climb past this, but
+ * sharper/back-to-back sections beyond it become walls). Final terrain is
+ * smoothed + clamped to this so every track stays rideable. P9.5.
+ */
+export const RIDEABLE_MAX_SLOPE_DEG = 36;
+/**
+ * Spike-softening passes applied before the rideable clamp. Each pass is an
+ * endpoint-pinned [0.25, 0.5, 0.25] neighbour average that rounds sharp chart
+ * spikes into grades without moving x (so point_count / worldLength survive).
+ * Tuned (cap 36° / 4 passes) so a competent run finishes even the steepest
+ * SAVAGE raw track with no crashes, while staying genuinely steep (P9.5).
+ */
+export const RIDEABLE_SMOOTH_PASSES = 4;
 /** Height band (price range -> y span) bounds, scaled by realized volatility. */
 export const MIN_BAND_M = 25;
 export const MAX_BAND_M = 90;
@@ -229,6 +244,62 @@ export function clampSlopeSegments(points: readonly TrackPoint[]): TrackPoint[] 
 }
 
 /**
+ * Spike-softener: `passes` rounds of an endpoint-pinned [0.25, 0.5, 0.25]
+ * neighbour average over y. x is untouched (so a track's point count, x grid
+ * and worldLength are preserved — this is safe to run on already-stored tracks
+ * in place). passes === 0 is an exact identity. Deterministic (round4, no RNG).
+ */
+export function smoothSpikes(points: readonly TrackPoint[], passes: number): TrackPoint[] {
+  if (passes <= 0 || points.length < 3) return points.map(([x, y]) => [x, y]);
+  let ys = points.map(([, y]) => y);
+  for (let p = 0; p < passes; p++) {
+    const next = ys.slice();
+    for (let i = 1; i < ys.length - 1; i++) {
+      next[i] = 0.25 * ys[i - 1] + 0.5 * ys[i] + 0.25 * ys[i + 1];
+    }
+    ys = next; // endpoints (0, n-1) are never written → stay pinned
+  }
+  return points.map(([x, y], i) => [
+    x,
+    round4(i === 0 || i === points.length - 1 ? y : ys[i]),
+  ]);
+}
+
+/**
+ * dx-AWARE per-segment slope clamp at `maxSlopeDeg`: caps each segment's |dy|
+ * at dx·tan(maxSlopeDeg), walking left→right and rebuilding y cumulatively.
+ * Unlike clampSlopeSegments (which assumes the fixed 6 m raw spacing), this
+ * honours the actual segment dx, so it is correct on smooth-mode tracks whose
+ * vertices sit ~1 m apart. Identity if nothing exceeds the cap. x is untouched.
+ */
+export function clampSlope(points: readonly TrackPoint[], maxSlopeDeg: number): TrackPoint[] {
+  const tan = Math.tan((maxSlopeDeg * Math.PI) / 180) * SLOPE_SAFETY;
+  const out: TrackPoint[] = [[points[0][0], round4(points[0][1])]];
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i][0] - points[i - 1][0];
+    const limit = dx * tan;
+    const dy = points[i][1] - points[i - 1][1];
+    const capped = dy > limit ? limit : dy < -limit ? -limit : dy;
+    out.push([points[i][0], round4(out[i - 1][1] + capped)]);
+  }
+  return out;
+}
+
+/**
+ * Make any polyline rideable for the current bike: soften sharp spikes
+ * (smoothSpikes) then clamp every segment to RIDEABLE_MAX_SLOPE_DEG. x is
+ * preserved, so this can rewrite a stored track IN PLACE (point_count and
+ * worldLength unchanged; only y / slope stats change). Pure + deterministic.
+ */
+export function makeRideable(
+  points: readonly TrackPoint[],
+  maxSlopeDeg: number = RIDEABLE_MAX_SLOPE_DEG,
+  passes: number = RIDEABLE_SMOOTH_PASSES,
+): TrackPoint[] {
+  return clampSlope(smoothSpikes(points, passes), maxSlopeDeg);
+}
+
+/**
  * Full tier pipeline: normalize → amplify → roughness → per-segment clamp.
  * `periodAmp` (1Y 1.0 / 6M 1.25 / 3M 1.5) multiplies the tier amplify so shorter
  * periods are more dramatic. With periodAmp = 1 the output is unchanged from the
@@ -243,7 +314,9 @@ export function generateTier(
   const base = normalize(closes);
   const amplified = amplify(base, cfg.amplify * periodAmp);
   const rough = roughness(amplified, cfg.roughness);
-  return clampSlopeSegments(rough);
+  // P9.5: soften spikes + clamp to the rideable cap (was clampSlopeSegments @55°,
+  // which left near-vertical walls the bike can't climb).
+  return makeRideable(rough);
 }
 
 /** The polyline as-is (validated fresh copy) — "raw" mode. */

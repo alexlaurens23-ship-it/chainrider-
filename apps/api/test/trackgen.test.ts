@@ -2,21 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BAND_M,
   MAX_CANDLES,
+  RIDEABLE_MAX_SLOPE_DEG,
   SPACING_M,
   amplify,
+  clampSlope,
   difficultyFor,
   downsample,
   generateTier,
+  makeRideable,
   normalize,
   rawTrack,
   roughness,
+  smoothSpikes,
   smoothTrack,
   stats,
   type TrackPoint,
 } from "../src/trackgen.js";
 
-/** Count segments at or above `thr` degrees — the "sustained challenge" metric. */
-function steepCount(points: TrackPoint[], thr = 45): number {
+/** Count segments at or above `thr` degrees — the "sustained challenge" metric.
+ *  Threshold sits below the rideable clamp (36°) so escalation is still visible. */
+function steepCount(points: TrackPoint[], thr = 30): number {
   let c = 0;
   for (let i = 1; i < points.length; i++) {
     const deg =
@@ -95,13 +100,13 @@ describe("golden determinism (byte-identical generation)", () => {
 
 // ── Difficulty tiers ────────────────────────────────────────────────────────
 const SPIKY_VOLATILE =
-  "[[0,-1.8952],[6,-1.4321],[12,-2.2918],[18,-1.265],[24,-1.0846],[30,-1.0282],[36,-0.53],[42,0.3646],[48,-0.3567],[54,0.9954],[60,9.5634],[66,0.9954],[72,1.0503],[78,1.8429],[84,1.3093],[90,2.4098],[96,3.1233],[102,2.8139],[108,4.1877],[114,3.7193],[120,4.7483],[126,5.3163],[132,5.36],[138,6.1592]]";
+  "[[0,-1.8952],[6,-1.7984],[12,-1.6563],[18,-1.4372],[24,-1.149],[30,-0.8173],[36,-0.4009],[42,0.3844],[48,1.969],[54,4.0804],[60,5.3831],[66,4.9811],[72,3.68],[78,2.8228],[84,2.7743],[90,3.1531],[96,3.6275],[102,4.0894],[108,4.5358],[114,4.9927],[120,5.4721],[126,5.9651],[132,6.4704],[138,6.9923]]";
 
 const SPIKY_DEGEN =
-  "[[0,-4.3548],[6,-3.5004],[12,-5.1132],[18,-3.69],[24,-1.8529],[30,-3.6437],[36,-1.9799],[42,-1.4203],[48,-1.307],[54,-0.0724],[60,8.4956],[66,-0.0724],[72,-1.2693],[78,-0.1352],[84,0.1969],[90,1.405],[96,2.8484],[102,2.0863],[108,4.3771],[114,3.719],[120,5.8002],[126,5.8045],[132,5.0803],[138,7.2751]]";
+  "[[0,-4.3548],[6,-4.2057],[12,-3.9484],[18,-3.5381],[24,-3.0626],[30,-2.6083],[36,-2.0379],[42,-0.8231],[48,1.69],[54,5.0152],[60,7.0324],[66,6.326],[72,4.1962],[78,2.8438],[84,2.8652],[90,3.5702],[96,4.3677],[102,5.1161],[108,5.8537],[114,6.583],[120,7.2394],[126,7.8399],[132,8.5564],[138,9.4702]]";
 
 const SPIKY_SAVAGE =
-  "[[0,-6.3226],[6,-5.8522],[12,-6.4693],[18,-4.4015],[24,-4.5013],[30,-5.6737],[36,-3.4727],[42,-2.7008],[48,-2.6567],[54,-0.8516],[60,7.7164],[66,-0.8516],[72,-2.2506],[78,-0.6112],[84,-1.4964],[90,0.4644],[96,3.9311],[102,1.8482],[108,3.7014],[114,2.7642],[120,6.8835],[126,7.188],[132,5.7433],[138,8.7465]]";
+  "[[0,-6.3226],[6,-6.0109],[12,-5.6231],[18,-5.2072],[24,-4.8245],[30,-4.3839],[36,-3.6355],[42,-1.9967],[48,1.2958],[54,5.6137],[60,8.2365],[66,7.3277],[72,4.5229],[78,2.6553],[84,2.6018],[90,3.5536],[96,4.6132],[102,5.428],[108,6.1655],[114,7.1038],[120,8.1905],[126,9.2228],[132,10.2643],[138,11.4524]]";
 
 describe("difficulty tiers", () => {
   it("VOLATILE/DEGEN/SAVAGE match their golden strings (seeded roughness is deterministic)", () => {
@@ -123,7 +128,7 @@ describe("difficulty tiers", () => {
     (_, i) => 100 + 22 * Math.sin(i * 0.7) + 9 * Math.sin(i * 1.9) + 4 * Math.cos(i * 0.4),
   );
 
-  it("harder tiers hit ~55° far more often (sustained challenge escalates)", () => {
+  it("harder tiers hit steep grades far more often (sustained challenge escalates)", () => {
     const volatile = generateTier(VARIED_CLOSES, "VOLATILE");
     const degen = generateTier(VARIED_CLOSES, "DEGEN");
     const savage = generateTier(VARIED_CLOSES, "SAVAGE");
@@ -143,11 +148,15 @@ describe("difficulty tiers", () => {
     expect(JSON.stringify(generateTier(SPIKY_CLOSES, "DEGEN", 1))).toBe(SPIKY_DEGEN);
   });
 
-  it("never exceeds the 55° clamp on any tier or period amplitude", () => {
+  it("never exceeds the rideable clamp on any tier or period amplitude", () => {
     for (const tier of ["VOLATILE", "DEGEN", "SAVAGE"] as const) {
       for (const amp of [1.0, 1.25, 1.5]) {
-        expect(stats(generateTier(SPIKY_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(55);
-        expect(stats(generateTier(CALM_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(55);
+        expect(stats(generateTier(SPIKY_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(
+          RIDEABLE_MAX_SLOPE_DEG,
+        );
+        expect(stats(generateTier(CALM_CLOSES, tier, amp)).maxSlopeDeg).toBeLessThanOrEqual(
+          RIDEABLE_MAX_SLOPE_DEG,
+        );
       }
     }
   });
@@ -156,6 +165,61 @@ describe("difficulty tiers", () => {
     const pts = normalize(SPIKY_CLOSES);
     expect(JSON.stringify(amplify(pts, 1))).toBe(JSON.stringify(pts));
     expect(JSON.stringify(roughness(pts, 0))).toBe(JSON.stringify(pts));
+  });
+});
+
+describe("rideability (P9.5: smoothSpikes / clampSlope / makeRideable)", () => {
+  // A vertical-walled spike track: 0→big up→big down at 6 m spacing (≈80°+ walls).
+  const WALLS: TrackPoint[] = [
+    [0, 0],
+    [6, 35],
+    [12, 0],
+    [18, 35],
+    [24, 0],
+    [30, 0],
+  ];
+  const grad = (p: TrackPoint[]): number => stats(p).maxSlopeDeg;
+
+  it("clampSlope caps every segment at the given angle (dx-aware), x untouched", () => {
+    const clamped = clampSlope(WALLS, RIDEABLE_MAX_SLOPE_DEG);
+    expect(grad(clamped)).toBeLessThanOrEqual(RIDEABLE_MAX_SLOPE_DEG);
+    expect(clamped.map(([x]) => x)).toEqual(WALLS.map(([x]) => x));
+  });
+
+  it("clampSlope honours actual dx (1 m vertices clamp tighter than 6 m)", () => {
+    const oneMetre: TrackPoint[] = [
+      [0, 0],
+      [1, 5],
+      [2, 0],
+    ];
+    const clamped = clampSlope(oneMetre, 36);
+    // 36° over 1 m allows |dy| ≈ tan(36°) ≈ 0.73 m, far less than the raw 5 m step.
+    expect(Math.abs(clamped[1][1] - clamped[0][1])).toBeLessThan(0.75);
+  });
+
+  it("smoothSpikes softens peaks, pins endpoints, preserves x and point count", () => {
+    const smoothed = smoothSpikes(WALLS, 4);
+    expect(smoothed.length).toBe(WALLS.length);
+    expect(smoothed[0]).toEqual([WALLS[0][0], WALLS[0][1]]);
+    expect(smoothed[smoothed.length - 1]).toEqual([WALLS[5][0], WALLS[5][1]]);
+    expect(smoothed.map(([x]) => x)).toEqual(WALLS.map(([x]) => x));
+    expect(grad(smoothed)).toBeLessThan(grad(WALLS)); // peaks are lower/rounder
+  });
+
+  it("smoothSpikes(_, 0) is an exact identity", () => {
+    expect(JSON.stringify(smoothSpikes(WALLS, 0))).toBe(JSON.stringify(WALLS));
+  });
+
+  it("makeRideable brings vertical walls under the rideable cap, x preserved", () => {
+    expect(grad(WALLS)).toBeGreaterThan(RIDEABLE_MAX_SLOPE_DEG); // precondition: a wall
+    const ride = makeRideable(WALLS);
+    expect(grad(ride)).toBeLessThanOrEqual(RIDEABLE_MAX_SLOPE_DEG);
+    expect(ride.map(([x]) => x)).toEqual(WALLS.map(([x]) => x)); // in-place safe (x grid intact)
+    expect(ride.length).toBe(WALLS.length);
+  });
+
+  it("makeRideable is deterministic (byte-identical across runs)", () => {
+    expect(JSON.stringify(makeRideable(WALLS))).toBe(JSON.stringify(makeRideable(WALLS)));
   });
 });
 

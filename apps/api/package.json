@@ -13,7 +13,8 @@
     "verify": "tsc --noEmit -p tsconfig.dev.json",
     "test": "vitest run",
     "seed": "tsx scripts/seed-maps.ts",
-    "backfill": "tsx scripts/backfill-difficulty.ts"
+    "backfill": "tsx scripts/backfill-difficulty.ts",
+    "smooth-tracks": "tsx scripts/smooth-tracks.ts"
   },
   "dependencies": {
     "@chainrider/physics": "0.1.0",

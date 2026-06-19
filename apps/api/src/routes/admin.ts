@@ -6,6 +6,7 @@ import {
   PERIOD_AMPLITUDE,
   TIERS,
   generateTier,
+  makeRideable,
   rawTrack,
   smoothTrack,
   stats,
@@ -58,7 +59,9 @@ async function generateAllTiers(
     const tierRaw = generateTier(closes, tier, periodAmp); // throws on <10 / invalid closes -> 422
     const pace = SCORING_CONFIG.parPaceMps[tier];
     for (const mode of ["raw", "smooth"] as const) {
-      const points = mode === "raw" ? rawTrack(tierRaw) : smoothTrack(tierRaw);
+      // tierRaw is already rideable (generateTier ends with makeRideable); the
+      // spline re-runs on it, so re-soften+clamp smooth mode to keep it rideable.
+      const points = mode === "raw" ? rawTrack(tierRaw) : makeRideable(smoothTrack(tierRaw));
       const s = stats(points);
       tracks.push({ tier, mode, points, stats: s, parTimeMs: Math.round((s.worldLength / pace) * 1000) });
     }
