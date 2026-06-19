@@ -7,6 +7,7 @@ import { createRideInput } from "../ride/input";
 import { createRideLoop, type RideEnd, type RideLoop } from "../ride/loop";
 import { createRideRenderer, type RideRenderer } from "../ride/render";
 import { createRideHud, type RideHud } from "../ride/hud";
+import { createTouchControls, isTouchDevice, type TouchControls } from "../ride/touch";
 import { showRunComplete } from "../ride/runComplete";
 
 const DEFAULT_MAX_SCORE = 50000;
@@ -16,6 +17,7 @@ export function createRideScreen(): Screen {
   let maxScore = DEFAULT_MAX_SCORE;
   let loop: RideLoop | null = null;
   let input: ReturnType<typeof createRideInput> | null = null;
+  let touch: TouchControls | null = null;
   let dismissCard: (() => void) | null = null;
   let onResize: (() => void) | null = null;
 
@@ -84,6 +86,7 @@ export function createRideScreen(): Screen {
     unmount() {
       loop?.stop();
       input?.dispose();
+      touch?.dispose();
       dismissCard?.();
       if (onResize) window.removeEventListener("resize", onResize);
     },
@@ -102,13 +105,18 @@ export function createRideScreen(): Screen {
     const hud: RideHud = createRideHud(root, trackName);
     const renderer: RideRenderer = createRideRenderer(trackInfo, hud.minimap);
 
+    const touchDevice = isTouchDevice();
+
     // New-player controls hint — shows briefly at the start of the ride, fades out.
-    const hint = document.createElement("div");
-    hint.className = "ride-controls-hint";
-    hint.textContent = "W throttle · Space jump · A/D lean";
-    root.appendChild(hint);
-    window.setTimeout(() => hint.classList.add("fade"), 4000);
-    window.setTimeout(() => hint.remove(), 5200);
+    // Keyboard hint on desktop; on touch the on-screen buttons are self-explanatory.
+    if (!touchDevice) {
+      const hint = document.createElement("div");
+      hint.className = "ride-controls-hint";
+      hint.textContent = "W throttle · Space jump · A/D lean";
+      root.appendChild(hint);
+      window.setTimeout(() => hint.classList.add("fade"), 4000);
+      window.setTimeout(() => hint.remove(), 5200);
+    }
 
     let muted = false;
     input = createRideInput({
@@ -122,6 +130,9 @@ export function createRideScreen(): Screen {
       onQuit: () => loop?.quit(),
     });
     const readMask = input.mask;
+
+    // On-screen thumb controls (drive the same input mask) — touch devices only.
+    if (touchDevice) touch = createTouchControls(root, input);
 
     const begin = (): void => {
       dismissCard?.();

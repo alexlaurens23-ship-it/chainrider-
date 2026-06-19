@@ -16,6 +16,12 @@ const KEY_BITS: Record<string, number> = {
 export interface RideInput {
   /** Current keymask. The loop samples this exactly once per fixed step. */
   mask(): Keymask;
+  /**
+   * Set or clear an INPUT bit directly (touch controls drive the SAME mask the
+   * keyboard does — identical bits, no separate input path). OR-merges with any
+   * keys currently held, so a held key and a held button never fight.
+   */
+  setBit(bit: number, on: boolean): void;
   /** Remove all window listeners (call on unmount). */
   dispose(): void;
 }
@@ -63,6 +69,10 @@ export function createRideInput(handlers: RideInputHandlers): RideInput {
 
   return {
     mask: () => mask,
+    setBit(bit: number, on: boolean) {
+      if (on) mask |= bit;
+      else mask &= ~bit;
+    },
     dispose() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);

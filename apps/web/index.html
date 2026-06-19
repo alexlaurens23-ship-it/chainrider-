@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
@@ -28,6 +31,140 @@
         display: block;
         width: 100vw;
         height: 100vh;
+        touch-action: none; /* no scroll/zoom gestures over the play area */
+      }
+
+      /* ── Touch controls (P9.6: phones/tablets only, mounted by ride.ts) ──── */
+      .touch-controls {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        pointer-events: none; /* only the buttons capture touches */
+        touch-action: none;
+        /* respect notches / rounded corners */
+        padding: 0 max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom))
+          max(18px, env(safe-area-inset-left));
+      }
+      .touch-controls.hidden {
+        display: none;
+      }
+      .touch-cluster {
+        position: absolute;
+        bottom: max(22px, env(safe-area-inset-bottom));
+        display: flex;
+        align-items: flex-end;
+        gap: 16px;
+      }
+      .touch-left {
+        left: max(18px, env(safe-area-inset-left));
+      }
+      .touch-right {
+        right: max(18px, env(safe-area-inset-right));
+      }
+      .touch-btn {
+        pointer-events: auto;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+        font-family: inherit;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: #eaffff;
+        background: rgba(8, 20, 28, 0.34);
+        border: 2px solid var(--neon, #00e5ff);
+        box-shadow:
+          0 0 14px rgba(0, 229, 255, 0.35),
+          inset 0 0 12px rgba(0, 229, 255, 0.15);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          transform 0.05s ease,
+          background 0.05s ease,
+          box-shadow 0.05s ease;
+      }
+      .touch-btn.active {
+        background: rgba(0, 229, 255, 0.4);
+        box-shadow:
+          0 0 26px rgba(0, 229, 255, 0.7),
+          inset 0 0 18px rgba(0, 229, 255, 0.4);
+        transform: scale(0.95);
+      }
+      .touch-btn.lean {
+        width: 84px;
+        height: 84px;
+        border-radius: 18px;
+        font-size: 30px;
+      }
+      .touch-btn.jump {
+        width: 92px;
+        height: 92px;
+        border-radius: 50%;
+        font-size: 17px;
+        border-color: #b07bff;
+        box-shadow:
+          0 0 14px rgba(176, 123, 255, 0.4),
+          inset 0 0 12px rgba(176, 123, 255, 0.18);
+        margin-bottom: 8px;
+      }
+      .touch-btn.jump.active {
+        background: rgba(176, 123, 255, 0.42);
+        box-shadow:
+          0 0 26px rgba(176, 123, 255, 0.75),
+          inset 0 0 18px rgba(176, 123, 255, 0.4);
+      }
+      .touch-btn.gas {
+        width: 124px;
+        height: 124px;
+        border-radius: 50%;
+        font-size: 24px;
+        border-color: #3df5a0;
+        box-shadow:
+          0 0 16px rgba(61, 245, 160, 0.4),
+          inset 0 0 14px rgba(61, 245, 160, 0.18);
+      }
+      .touch-btn.gas.active {
+        background: rgba(61, 245, 160, 0.42);
+        box-shadow:
+          0 0 30px rgba(61, 245, 160, 0.8),
+          inset 0 0 20px rgba(61, 245, 160, 0.45);
+      }
+
+      /* Portrait nudge — only toggled .show on touch devices in portrait. */
+      .rotate-prompt {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: rgba(4, 8, 12, 0.92);
+        color: #eaffff;
+        text-align: center;
+        padding: 40px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 19px;
+        line-height: 1.5;
+      }
+      .rotate-prompt.show {
+        display: flex;
+      }
+      .rotate-icon {
+        font-size: 56px;
+        color: var(--neon, #00e5ff);
+        margin-bottom: 14px;
+        animation: rotate-hint 1.8s ease-in-out infinite;
+      }
+      @keyframes rotate-hint {
+        0%,
+        100% {
+          transform: rotate(-12deg);
+        }
+        50% {
+          transform: rotate(78deg);
+        }
       }
 
       /* ── Shared HUD / playground (unchanged) ───────────────────────────── */
