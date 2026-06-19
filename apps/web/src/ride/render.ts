@@ -9,6 +9,16 @@ import { MINIMAP_H, MINIMAP_W } from "./hud";
 const SHAKE_MS = 250;
 const SHAKE_PX = 9;
 const CRASH_PARTICLES = 10;
+const FLIP_POPUP_MS = 800; // float "+N" lifetime
+const FLIP_POPUP_RISE_PX = 40; // how far it rises over its life
+
+/** Floating "+N" trick-score popup, anchored to a world position above the bike. */
+interface FlipPopup {
+  x: number;
+  y: number;
+  text: string;
+  born: number;
+}
 
 interface Particle {
   x: number;
@@ -140,10 +150,12 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
   // ── Cosmetic effect state (render-only) ──────────────────────────────────
   const trail = createTrail();
   let particles: Particle[] = [];
+  let popups: FlipPopup[] = [];
   let shakeUntil = 0;
   let lastNow = performance.now();
   let lastFlips = 0;
   let lastCombo = 1;
+  let lastScore = 0;
   let lastCrashed = false;
   const reduceMotion = prefersReducedMotion();
 
@@ -163,9 +175,11 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       zoom = 1;
       trail.clear();
       particles = [];
+      popups = [];
       shakeUntil = 0;
       lastFlips = 0;
       lastCombo = 1;
+      lastScore = 0;
       lastCrashed = false;
     },
 
@@ -197,13 +211,21 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       const rearY = lerp(prev.rearWheel.y, curr.rearWheel.y, alpha);
       if (!curr.crashed) trail.push(rearX, rearY);
       if (curr.flips > lastFlips || curr.combo > lastCombo) trail.pulse();
+      // Flip popup: show the points the scoring system actually awarded this step
+      // (the live trick-score delta — flips raise snapshot.score via rawTrickPoints).
+      if (curr.flips > lastFlips) {
+        const delta = Math.round(curr.score - lastScore);
+        if (delta > 0) popups.push({ x: chassisX, y: chassisY + 0.7, text: `+${delta}`, born: now });
+      }
       if (!lastCrashed && curr.crashed) {
         spawnCrashBurst(chassisX, chassisY);
         if (!reduceMotion) shakeUntil = now + SHAKE_MS;
       }
       lastFlips = curr.flips;
       lastCombo = curr.combo;
+      lastScore = curr.score;
       lastCrashed = curr.crashed;
+      popups = popups.filter((p) => now - p.born < FLIP_POPUP_MS);
       // Advance particles (real-time; cosmetic).
       for (const p of particles) {
         p.life -= dt;
@@ -236,12 +258,46 @@ export function createRideRenderer(track: TrackInfo, minimap: HTMLCanvasElement)
       drawBike(ctx, { toX, toY, scale: pxPerM, prev, curr, alpha, tune, skin, inputMask: mask });
       if (showBodies) drawBodies(ctx, toX, toY, pxPerM, prev, curr, alpha, tune);
       drawParticles(ctx, particles, toX, toY, pxPerM, skin.primary);
+      drawFlipPopups(ctx, popups, toX, toY, now, skin.primary);
 
       if (shaken) ctx.restore();
 
       drawMinimap(minimap, bakedMinimap, terrain, chassisX, minX, maxX, minY, maxY);
     },
   };
+}
+
+/** Floating neon "+N" trick popups: rise + fade over their life, world-anchored. */
+function drawFlipPopups(
+  ctx: CanvasRenderingContext2D,
+  popups: FlipPopup[],
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+  now: number,
+  color: string,
+): void {
+  if (popups.length === 0) return;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold 18px monospace";
+  ctx.shadowColor = color;
+  for (const p of popups) {
+    const age = (now - p.born) / FLIP_POPUP_MS; // 0..1
+    if (age < 0 || age >= 1) continue;
+    const sx = toX(p.x);
+    const sy = toY(p.y) - FLIP_POPUP_RISE_PX * age;
+    ctx.globalAlpha = 1 - age;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = color; // neon glow
+    ctx.fillText(p.text, sx, sy);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ffffff"; // crisp white core
+    ctx.fillText(p.text, sx, sy);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
 }
 
 function drawParticles(
